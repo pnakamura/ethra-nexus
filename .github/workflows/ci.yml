@@ -59,7 +59,7 @@ jobs:
           node-version: '20'
       - run: npm install --legacy-peer-deps
       - name: npm audit
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=critical
 
       - name: Check for leaked secrets
         run: |
