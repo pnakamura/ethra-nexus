@@ -1,0 +1,32 @@
+{
+  "name": "@ethra-nexus/agents",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ethra-nexus/core": "*",
+    "@ethra-nexus/db": "*",
+    "@ethra-nexus/wiki": "*",
+    "@anthropic-ai/sdk": "^0.24.0",
+    "openai": "^4.50.0",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.8.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/pdf-parse": "^1.1.4",
+    "tsx": "^4.16.0",
+    "vitest": "^1.6.0"
+  }
+}

@@ -1,0 +1,87 @@
+name: ethra-nexus-dev
+
+services:
+  # ── Frontend (Vite dev server com HMR) ───────────────────────
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+      target: deps
+    command: npm run dev -- --filter=@ethra-nexus/web
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../..:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_SUPABASE_URL=${SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - VITE_APP_URL=http://localhost:5173
+      - VITE_API_URL=http://localhost:3000
+
+  # ── Backend (AIOS Master + API) ──────────────────────────────
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+      target: deps
+    command: npx tsx packages/agents/src/server.ts
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../..:/app
+      - /app/node_modules
+      - ../../wikis:/app/wikis    # wikis acessíveis pelo server
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - WIKIS_BASE_PATH=/app/wikis
+      # Supabase
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      # AI Providers
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Embeddings
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    depends_on:
+      - n8n
+      - silverbullet
+
+  # ── N8N (automação e workflows de agentes) ─────────────────
+  n8n:
+    image: n8nio/n8n:1.68.0
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-changeme}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-devkey12345678901234567890123456}
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ../../infra/n8n/workflows:/home/node/.n8n/workflows:ro
+
+  # ── SilverBullet (wiki UI) ─────────────────────────────────
+  silverbullet:
+    image: ghcr.io/silverbulletmd/silverbullet:0.10.0
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - SB_USER=${SB_USER:-admin:changeme}
+    volumes:
+      - ../../wikis:/space
+
+volumes:
+  n8n_data:

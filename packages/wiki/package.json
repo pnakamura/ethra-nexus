@@ -1,0 +1,22 @@
+{
+  "name": "@ethra-nexus/wiki",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ethra-nexus/core": "*",
+    "openai": "^4.50.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}

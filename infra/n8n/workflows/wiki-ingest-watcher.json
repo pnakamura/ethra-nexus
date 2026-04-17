@@ -1,0 +1,115 @@
+{
+  "name": "Wiki Ingest Watcher",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_pending_raw_sources",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "options": {}
+      },
+      "id": "fetch-pending",
+      "name": "Fetch Pending Sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "notes": "Query wiki_raw_sources WHERE status='pending' via Supabase REST API"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "conditions": [
+            {
+              "id": "check-has-items",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": "0",
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has-pending",
+      "name": "Has pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://app:3000/api/task",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agent_id\": \"{{ $json.agent_id }}\",\n  \"skill_id\": \"wiki:ingest\",\n  \"payload\": { \"source_id\": \"{{ $json.id }}\" },\n  \"activation\": \"event\",\n  \"activation_source\": \"wiki:source_added\",\n  \"triggered_by\": \"system\"\n}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "trigger-ingest",
+      "name": "Trigger Ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 200],
+      "notes": "Calls AIOS Master to ingest each pending source"
+    },
+    {
+      "parameters": {},
+      "id": "no-items",
+      "name": "No pending sources",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [920, 400]
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [[{ "node": "Fetch Pending Sources", "type": "main", "index": 0 }]]
+    },
+    "Fetch Pending Sources": {
+      "main": [[{ "node": "Has pending?", "type": "main", "index": 0 }]]
+    },
+    "Has pending?": {
+      "main": [
+        [{ "node": "Trigger Ingest", "type": "main", "index": 0 }],
+        [{ "node": "No pending sources", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "wiki" },
+    { "name": "ingest" },
+    { "name": "automated" }
+  ]
+}

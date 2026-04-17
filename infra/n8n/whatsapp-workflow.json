@@ -1,0 +1,192 @@
+{
+  "name": "WhatsApp — Ethra Nexus",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "webhookId": "ethra-whatsapp-handler"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst data = body?.data;\n\nif (!data || data.key?.fromMe) return [];\n\nconst text = (\n  data.message?.conversation ||\n  data.message?.extendedTextMessage?.text ||\n  ''\n).trim();\n\nif (!text) return [];\n\nconst from = data.key?.remoteJid || '';\nconst args = text.split(' ').slice(1).join(' ');\n\nlet replyText = '';\nlet needsSearch = false;\nlet searchQuery = '';\n\nif (text.startsWith('/ajuda')) {\n  replyText =\n    '🤖 *Ethra Nexus — Comandos disponíveis*\\n\\n' +\n    '/ajuda — esta mensagem\\n' +\n    '/status — status do sistema\\n' +\n    '/agentes — lista de agentes ativos\\n' +\n    '/buscar [termo] — busca na wiki\\n' +\n    '/aprovar [id] — aprova uma tarefa pendente';\n\n} else if (text.startsWith('/status')) {\n  replyText = '✅ *Status Ethra Nexus*\\n\\nServidor: online\\nVersão: 1.0.0';\n\n} else if (text.startsWith('/agentes')) {\n  replyText = '🤖 *Agentes*\\n\\nIntegração em configuração. Em breve disponível.';\n\n} else if (text.startsWith('/buscar')) {\n  if (!args) {\n    replyText = '🔍 Uso: /buscar [termo]\\nEx: /buscar política de pagamento';\n  } else {\n    needsSearch = true;\n    searchQuery = args;\n  }\n\n} else if (text.startsWith('/aprovar')) {\n  replyText = args\n    ? `✅ Aprovação solicitada para: ${args}\\n\\n⚙️ Integração com tickets em configuração.`\n    : '✅ Uso: /aprovar [id-da-tarefa]';\n\n} else {\n  replyText = '❓ Comando não reconhecido.\\n\\nDigite /ajuda para ver os comandos disponíveis.';\n}\n\nreturn [{ json: { from, replyText, needsSearch, searchQuery } }];"
+      },
+      "id": "node-code",
+      "name": "Parse Comando",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needsSearch }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-if",
+      "name": "Precisa Buscar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.nexus.ethra.com.br/api/v1/auth/login",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "slug", "value": "minha-org" },
+            { "name": "password", "value": "minha-org" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-login",
+      "name": "Login API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [860, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.nexus.ethra.com.br/api/v1/wiki/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Login API').item.json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "query", "value": "={{ $('Parse Comando').item.json.searchQuery }}" },
+            { "name": "limit", "value": "3" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-search",
+      "name": "Buscar Wiki",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1080, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.data || [];\nconst from = $('Parse Comando').item.json.from;\nconst query = $('Parse Comando').item.json.searchQuery;\n\nif (results.length === 0) {\n  return [{ json: { from, replyText: `🔍 Nenhum resultado encontrado para: \"${query}\"` } }];\n}\n\nconst lines = results.map((r, i) =>\n  `${i + 1}. *${r.title}* (${r.type})`\n);\nconst replyText = `🔍 *Resultados para \"${query}\":*\\n\\n${lines.join('\\n')}`;\nreturn [{ json: { from, replyText } }];"
+      },
+      "id": "node-format",
+      "name": "Formatar Resultados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://evolution.nexus.ethra.com.br/message/sendText/ethra-whatsapp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "NexusEvolution2026!" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $json.from }}" },
+            { "name": "text", "value": "={{ $json.replyText }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-send-search",
+      "name": "Enviar Resultado Busca",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1520, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://evolution.nexus.ethra.com.br/message/sendText/ethra-whatsapp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "NexusEvolution2026!" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $json.from }}" },
+            { "name": "text", "value": "={{ $json.replyText }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-send-direct",
+      "name": "Enviar Resposta Direta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [860, 560]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{"node": "Parse Comando", "type": "main", "index": 0}]
+      ]
+    },
+    "Parse Comando": {
+      "main": [
+        [{"node": "Precisa Buscar?", "type": "main", "index": 0}]
+      ]
+    },
+    "Precisa Buscar?": {
+      "main": [
+        [{"node": "Login API", "type": "main", "index": 0}],
+        [{"node": "Enviar Resposta Direta", "type": "main", "index": 0}]
+      ]
+    },
+    "Login API": {
+      "main": [
+        [{"node": "Buscar Wiki", "type": "main", "index": 0}]
+      ]
+    },
+    "Buscar Wiki": {
+      "main": [
+        [{"node": "Formatar Resultados", "type": "main", "index": 0}]
+      ]
+    },
+    "Formatar Resultados": {
+      "main": [
+        [{"node": "Enviar Resultado Busca", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0
+}
