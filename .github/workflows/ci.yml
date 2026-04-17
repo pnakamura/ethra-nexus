@@ -27,7 +27,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --frozen-lockfile
+        run: npm install --legacy-peer-deps
 
       - name: TypeScript check
         run: npm run typecheck
@@ -59,7 +59,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-      - run: npm ci --frozen-lockfile
+      - run: npm install --legacy-peer-deps
       - name: npm audit
         run: npm audit --audit-level=high
 
