@@ -65,7 +65,9 @@ jobs:
       - name: Check for leaked secrets
         run: |
           # Garante que nenhuma chave de API vazou no código
-          if grep -rE "sk-ant-|sk-or-|eyJ[A-Za-z0-9+/]{100,}" \
+          # Padrão requer ≥10 chars alfanuméricos após o prefixo para
+          # evitar falso positivo com regex patterns em sanitize.ts
+          if grep -rE "(sk-ant-|sk-or-)[A-Za-z0-9]{10,}|eyJ[A-Za-z0-9+/]{100,}" \
             --include="*.ts" --include="*.tsx" --include="*.js" \
             --exclude-dir=node_modules --exclude-dir=dist .; then
             echo "ERRO: Possível chave de API detectada no código"
