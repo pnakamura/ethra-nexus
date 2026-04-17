@@ -64,7 +64,6 @@ async function regenerateEmbedding(
 
 export async function wikiRoutes(app: FastifyInstance) {
   const wikiDb = createWikiDb()
-  const providerRegistry = createRegistryFromEnv()
 
   // ── POST /wiki/pages ───────────────────────────────────────
   app.post<{ Body: CreatePageBody }>('/wiki/pages', async (request, reply) => {
@@ -175,6 +174,7 @@ export async function wikiRoutes(app: FastifyInstance) {
     }
 
     // 2. LLM extraction (Anthropic Sonnet — LGPD)
+    const providerRegistry = createRegistryFromEnv()
     let extraction: Awaited<ReturnType<typeof extractPagesFromContent>>
     try {
       extraction = await extractPagesFromContent(text, source_name, providerRegistry)
