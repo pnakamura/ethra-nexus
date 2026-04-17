@@ -35,17 +35,10 @@ jobs:
         run: npm run lint
 
       - name: Unit tests
-        run: npm run test -- --coverage
+        run: npm run test
 
       - name: Build
         run: npm run build
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
 
   security:
     name: Security audit
