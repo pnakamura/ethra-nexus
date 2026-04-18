@@ -22,6 +22,7 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - APP_URL=${APP_URL}
+      - WIKIS_BASE_PATH=/wikis
       # Secrets montados como arquivos, não como env vars
       - SUPABASE_SERVICE_ROLE_KEY_FILE=/run/secrets/supabase_service_role_key
       - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
@@ -37,6 +38,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      - wikis_data:/wikis          # compartilhado com silverbullet
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s

@@ -23,7 +23,7 @@ export { parseFile, parseBuffer } from './lib/parsers'
 export type { FileType } from './lib/parsers'
 
 // FS
-export { WikiFsAdapter } from './lib/fs'
+export { WikiFsAdapter, syncWikiToFilesystem } from './lib/fs'
 
 // Bootstrap (runtime composition)
 export { bootstrap } from './bootstrap'

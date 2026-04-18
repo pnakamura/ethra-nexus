@@ -7,7 +7,7 @@ import {
   extractPagesFromContent,
 } from '@ethra-nexus/wiki'
 import type { FileType } from '@ethra-nexus/agents'
-import { createWikiDb, createRegistryFromEnv, parseBuffer } from '@ethra-nexus/agents'
+import { createWikiDb, createRegistryFromEnv, parseBuffer, syncWikiToFilesystem } from '@ethra-nexus/agents'
 
 interface CheckNewBody {
   files: Array<{ source_url: string; modified_time: string }>
@@ -185,6 +185,28 @@ async function runIngestFromBuffer(
 
 const VALID_ORIGINS: SourceOrigin[] = ['api', 'google_drive', 'upload', 'n8n']
 
+async function getTenantSlug(tenantId: string): Promise<string | null> {
+  const result = await getDb().execute(
+    sql`SELECT slug FROM tenants WHERE id = ${tenantId} LIMIT 1`,
+  )
+  const row = result.rows[0] as { slug: string } | undefined
+  return row?.slug ?? null
+}
+
+function fireSyncAfterIngest(tenantId: string, log: Pick<FastifyInstance['log'], 'warn' | 'error'>) {
+  getTenantSlug(tenantId)
+    .then((slug) => {
+      if (!slug) return
+      return syncWikiToFilesystem(tenantId, slug)
+    })
+    .then((r) => {
+      if (r) log.warn({ synced: r.synced, failed: r.failed }, 'wiki fs sync after ingest')
+    })
+    .catch((err: unknown) => {
+      log.error({ err: (err as Error).message }, 'wiki fs sync failed')
+    })
+}
+
 export async function wikiRoutes(app: FastifyInstance) {
   const wikiDb = createWikiDb()
 
@@ -298,6 +320,7 @@ export async function wikiRoutes(app: FastifyInstance) {
     }, request.log)
 
     if ('error' in out) return reply.status(out.error.status).send(out.error.body)
+    fireSyncAfterIngest(request.tenantId, request.log)
     return out.result
   })
 
@@ -330,6 +353,7 @@ export async function wikiRoutes(app: FastifyInstance) {
     }, request.log)
 
     if ('error' in out) return reply.status(out.error.status).send(out.error.body)
+    fireSyncAfterIngest(request.tenantId, request.log)
     return out.result
   })
 
@@ -375,6 +399,16 @@ export async function wikiRoutes(app: FastifyInstance) {
     }
 
     return { to_process, to_skip }
+  })
+
+  // ── POST /wiki/sync/filesystem ───────────────────────────
+  // Exporta todas as páginas ativas para arquivos .md (SilverBullet).
+  app.post('/wiki/sync/filesystem', async (request, reply) => {
+    const slug = await getTenantSlug(request.tenantId)
+    if (!slug) return reply.status(404).send({ error: 'Tenant not found' })
+
+    const result = await syncWikiToFilesystem(request.tenantId, slug)
+    return result
   })
 
   // ── POST /wiki/pages/:id/reembed ──────────────────────────

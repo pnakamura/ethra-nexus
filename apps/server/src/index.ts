@@ -32,6 +32,7 @@ async function main() {
     console.log('  POST /api/v1/wiki/pages/:id/reembed')
     console.log('  POST /api/v1/wiki/ingest')
     console.log('  POST /api/v1/wiki/ingest/stream')
+    console.log('  POST /api/v1/wiki/sync/filesystem')
   } catch (err) {
     console.error('[Nexus] Fatal:', err)
     await closeDb()
