@@ -87,7 +87,7 @@ async function runIngestFromBuffer(
 ): Promise<{ error: IngestError } | { result: IngestResult }> {
   const db = getDb()
 
-  const [rawSource] = await db
+  const insertResult = await db
     .insert(wikiRawSources)
     .values({
       tenant_id: tenantId,
@@ -98,6 +98,8 @@ async function runIngestFromBuffer(
       status: 'processing',
     })
     .returning({ id: wikiRawSources.id })
+  const rawSource = insertResult[0]
+  if (!rawSource) throw new Error('wiki_raw_sources insert returned no rows')
 
   const updateSource = async (
     status: 'done' | 'failed',
