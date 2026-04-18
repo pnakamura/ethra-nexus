@@ -9,6 +9,10 @@ import {
 import type { FileType } from '@ethra-nexus/agents'
 import { createWikiDb, createRegistryFromEnv, parseBuffer } from '@ethra-nexus/agents'
 
+interface CheckNewBody {
+  files: Array<{ source_url: string; modified_time: string }>
+}
+
 interface CreatePageBody {
   slug: string
   title: string
@@ -327,6 +331,50 @@ export async function wikiRoutes(app: FastifyInstance) {
 
     if ('error' in out) return reply.status(out.error.status).send(out.error.body)
     return out.result
+  })
+
+  // ── POST /wiki/sources/check-new ─────────────────────────
+  // Recebe lista de {source_url, modified_time} e retorna quais
+  // devem ser processados (novos ou atualizados desde último ingest).
+  app.post<{ Body: CheckNewBody }>('/wiki/sources/check-new', async (request, _reply) => {
+    const { files } = request.body
+    if (!files?.length) {
+      return { to_process: [], to_skip: [] }
+    }
+
+    // Busca todos os sources já ingeridos com sucesso para este tenant
+    const result = await getDb().execute(
+      sql`SELECT source_url, MAX(ingested_at) AS last_ingested_at
+          FROM wiki_raw_sources
+          WHERE tenant_id = ${request.tenantId}
+            AND status = 'done'
+            AND source_url IS NOT NULL
+          GROUP BY source_url`,
+    )
+
+    const ingested = new Map<string, Date>()
+    for (const row of result.rows as Array<{ source_url: string; last_ingested_at: string | null }>) {
+      if (row.source_url && row.last_ingested_at) {
+        ingested.set(row.source_url, new Date(row.last_ingested_at))
+      }
+    }
+
+    const to_process: Array<{ source_url: string; reason: 'new' | 'updated' }> = []
+    const to_skip: Array<{ source_url: string; last_ingested_at: string }> = []
+
+    for (const file of files) {
+      if (!file.source_url) continue
+      const lastIngested = ingested.get(file.source_url)
+      if (!lastIngested) {
+        to_process.push({ source_url: file.source_url, reason: 'new' })
+      } else if (new Date(file.modified_time) > lastIngested) {
+        to_process.push({ source_url: file.source_url, reason: 'updated' })
+      } else {
+        to_skip.push({ source_url: file.source_url, last_ingested_at: lastIngested.toISOString() })
+      }
+    }
+
+    return { to_process, to_skip }
   })
 
   // ── POST /wiki/pages/:id/reembed ──────────────────────────
