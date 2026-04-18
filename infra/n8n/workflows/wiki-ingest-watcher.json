@@ -59,7 +59,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const token = $('Login Nexus API').item.json.token;\nconst cutoff = new Date(Date.now() - 20 * 60 * 1000);\n\nconst mimeToFileType = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',\n  'text/markdown': 'md',\n  'text/plain': 'txt'\n};\n\nconst results = [];\nfor (const item of $input.all()) {\n  const file = item.json;\n  const modified = file.modifiedTime ? new Date(file.modifiedTime) : null;\n  if (modified && modified < cutoff) continue;\n  const fileType = mimeToFileType[file.mimeType];\n  if (!fileType) continue;\n  results.push({ json: { ...file, file_type: fileType, token } });\n}\n\nreturn results;"
+        "jsCode": "const token = $('Login Nexus API').item.json.token;\n\nconst extToFileType = {\n  'pdf': 'pdf',\n  'docx': 'docx',\n  'xlsx': 'xlsx',\n  'md': 'md',\n  'txt': 'txt'\n};\n\nconst results = [];\nfor (const item of $input.all()) {\n  const file = item.json;\n  const ext = (file.name || '').split('.').pop().toLowerCase();\n  const fileType = extToFileType[ext];\n  if (!fileType) continue;\n  results.push({ json: { ...file, file_type: fileType, token } });\n}\n\nreturn results;"
       },
       "id": "filter-recent",
       "name": "Filtrar recentes e tipo suportado",
