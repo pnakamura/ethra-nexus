@@ -20,8 +20,8 @@
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
-            { "name": "slug", "value": "={{ $env.NEXUS_TENANT_SLUG }}" },
-            { "name": "password", "value": "={{ $env.NEXUS_TENANT_PASSWORD }}" }
+            { "name": "slug", "value": "minha-org" },
+            { "name": "password", "value": "minha-org" }
           ]
         },
         "options": {}
@@ -34,31 +34,32 @@
     },
     {
       "parameters": {
-        "operation": "list",
-        "folderId": "={{ $env.GOOGLE_DRIVE_INGEST_FOLDER_ID }}",
-        "queryFilters": {
-          "filters": [
-            {
-              "name": "modifiedTime",
-              "condition": "is after",
-              "value": "={{ $now.minus(20, 'minutes').toISO() }}"
-            },
-            {
-              "name": "trashed",
-              "condition": "is equal to",
-              "value": false
-            }
-          ]
-        },
+        "operation": "search",
+        "filter": "'1-AQIJtJ0ozpL9S03ZtElOqUOrEF-vf2T' in parents and trashed = false",
         "options": {
-          "fields": "id,name,mimeType,modifiedTime,size"
+          "fields": "id,name,mimeType,modifiedTime"
         }
       },
       "id": "list-files",
       "name": "Listar Arquivos Novos",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [680, 300]
+      "position": [680, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive Nexus"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = $('Login Nexus API').item.json.token;\nconst cutoff = new Date(Date.now() - 20 * 60 * 1000);\n\nconst mimeToFileType = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',\n  'text/markdown': 'md',\n  'text/plain': 'txt'\n};\n\nconst results = [];\nfor (const item of $input.all()) {\n  const file = item.json;\n  const modified = new Date(file.modifiedTime);\n  if (modified < cutoff) continue;\n  const fileType = mimeToFileType[file.mimeType];\n  if (!fileType) continue;\n  results.push({ json: { ...file, file_type: fileType, token } });\n}\n\nreturn results;"
+      },
+      "id": "filter-recent",
+      "name": "Filtrar recentes e tipo suportado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
     },
     {
       "parameters": {
@@ -67,7 +68,7 @@
           "conditions": [
             {
               "id": "has-files",
-              "leftValue": "={{ $json.files?.length ?? 0 }}",
+              "leftValue": "={{ $input.all().length }}",
               "rightValue": 0,
               "operator": { "type": "number", "operation": "gt" }
             }
@@ -79,30 +80,7 @@
       "name": "Tem arquivos novos?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [900, 300]
-    },
-    {
-      "parameters": {
-        "fieldToSplitOut": "files",
-        "include": "selectedOtherFields",
-        "fieldsToInclude": "token",
-        "options": {}
-      },
-      "id": "split-files",
-      "name": "Para cada arquivo",
-      "type": "n8n-nodes-base.splitOut",
-      "typeVersion": 1,
-      "position": [1120, 200]
-    },
-    {
-      "parameters": {
-        "jsCode": "const mimeType = $json.mimeType || '';\nconst name = $json.name || '';\n\nconst mimeToFileType = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',\n  'text/markdown': 'md',\n  'text/plain': 'txt',\n  'application/vnd.google-apps.document': 'gdoc',\n};\n\nconst fileType = mimeToFileType[mimeType] || null;\n\nif (!fileType) {\n  return []; // pula tipos não suportados silenciosamente\n}\n\nreturn [{ json: { ...$json, file_type: fileType, token: $('Login Nexus API').item.json.token } }];"
-      },
-      "id": "resolve-type",
-      "name": "Resolver tipo do arquivo",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1340, 200]
+      "position": [1120, 300]
     },
     {
       "parameters": {
@@ -114,17 +92,22 @@
       "name": "Download do arquivo",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [1560, 200]
+      "position": [1340, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "name": "Google Drive Nexus"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const binaryData = $binary.data;\nif (!binaryData) throw new Error('Arquivo sem conteúdo binário');\n\nconst base64 = binaryData.data;\nconst fileName = $json.name;\nconst fileType = $json.file_type;\nconst fileId = $json.id;\nconst token = $json.token;\n\nreturn [{ json: { content_base64: base64, file_type: fileType, source_name: fileName, source_url: `https://drive.google.com/file/d/${fileId}`, source_origin: 'google_drive', token } }];"
+        "jsCode": "const binaryKey = Object.keys($binary)[0];\nif (!binaryKey) throw new Error('Arquivo sem conteúdo binário');\n\nconst base64 = $binary[binaryKey].data;\nconst fileName = $json.name;\nconst fileType = $json.file_type;\nconst fileId = $json.id;\nconst token = $json.token;\n\nreturn [{ json: {\n  content_base64: base64,\n  file_type: fileType,\n  source_name: fileName,\n  source_url: `https://drive.google.com/file/d/${fileId}`,\n  source_origin: 'google_drive',\n  token\n} }];"
       },
       "id": "prepare-payload",
       "name": "Preparar payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1780, 200]
+      "position": [1560, 200]
     },
     {
       "parameters": {
@@ -133,8 +116,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $json.token }}" },
-            { "name": "Content-Type", "value": "application/json" }
+            { "name": "Authorization", "value": "=Bearer {{ $json.token }}" }
           ]
         },
         "sendBody": true,
@@ -146,17 +128,7 @@
       "name": "POST /wiki/ingest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2000, 200]
-    },
-    {
-      "parameters": {
-        "jsCode": "const result = $json;\nconst sourceName = $('Preparar payload').item.json.source_name;\n\nif (result.pages_persisted > 0) {\n  return [{ json: { notify: true, message: `✅ *Wiki atualizada*\\n\\nArquivo: ${sourceName}\\nPáginas extraídas: ${result.pages_extracted}\\nPáginas salvas: ${result.pages_persisted}\\nID fonte: ${result.source_id}` } }];\n}\nreturn [{ json: { notify: false } }];"
-      },
-      "id": "check-result",
-      "name": "Verificar resultado",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [2220, 200]
+      "position": [1780, 200]
     },
     {
       "parameters": {},
@@ -164,7 +136,7 @@
       "name": "Sem arquivos novos",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1120, 400]
+      "position": [1340, 400]
     }
   ],
   "connections": {
@@ -175,38 +147,30 @@
       "main": [[{ "node": "Listar Arquivos Novos", "type": "main", "index": 0 }]]
     },
     "Listar Arquivos Novos": {
+      "main": [[{ "node": "Filtrar recentes e tipo suportado", "type": "main", "index": 0 }]]
+    },
+    "Filtrar recentes e tipo suportado": {
       "main": [[{ "node": "Tem arquivos novos?", "type": "main", "index": 0 }]]
     },
     "Tem arquivos novos?": {
       "main": [
-        [{ "node": "Para cada arquivo", "type": "main", "index": 0 }],
+        [{ "node": "Download do arquivo", "type": "main", "index": 0 }],
         [{ "node": "Sem arquivos novos", "type": "main", "index": 0 }]
       ]
-    },
-    "Para cada arquivo": {
-      "main": [[{ "node": "Resolver tipo do arquivo", "type": "main", "index": 0 }]]
-    },
-    "Resolver tipo do arquivo": {
-      "main": [[{ "node": "Download do arquivo", "type": "main", "index": 0 }]]
     },
     "Download do arquivo": {
       "main": [[{ "node": "Preparar payload", "type": "main", "index": 0 }]]
     },
     "Preparar payload": {
       "main": [[{ "node": "POST /wiki/ingest", "type": "main", "index": 0 }]]
-    },
-    "POST /wiki/ingest": {
-      "main": [[{ "node": "Verificar resultado", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "errorWorkflow": ""
+    "executionOrder": "v1"
   },
   "tags": [
     { "name": "wiki" },
     { "name": "ingest" },
-    { "name": "google-drive" },
-    { "name": "automated" }
+    { "name": "google-drive" }
   ]
 }
