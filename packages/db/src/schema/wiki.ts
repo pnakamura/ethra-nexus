@@ -103,6 +103,28 @@ export const wikiOperationsLog = pgTable('wiki_operations_log', {
   wolOperationIdx: index('wol_operation_idx').on(table.operation),
 }))
 
+// ── Wiki Raw Sources — audit log de ingestões ───────────────
+// Registra cada documento ingerido (Google Drive, upload, API)
+// Não é uma fila de polling — é rastreabilidade LGPD de fontes.
+
+export const wikiRawSources = pgTable('wiki_raw_sources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenant_id: uuid('tenant_id').notNull().references(() => tenants.id),
+  name: text('name').notNull(),
+  file_type: text('file_type').notNull(),
+  source_url: text('source_url'),
+  source_origin: text('source_origin').notNull().default('api'),
+  status: text('status').notNull().default('processing'),
+  pages_extracted: integer('pages_extracted'),
+  pages_persisted: integer('pages_persisted'),
+  error_msg: text('error_msg'),
+  ingested_at: timestamp('ingested_at'),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  wrseTenantIdx: index('wrse_tenant_idx').on(table.tenant_id),
+  wrseStatusIdx: index('wrse_status_idx').on(table.status),
+}))
+
 // ── Wiki Agent Writes — staging de propostas de agentes ─────
 
 export const wikiAgentWrites = pgTable('wiki_agent_writes', {

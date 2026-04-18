@@ -1,14 +1,14 @@
 {
-  "name": "Wiki Ingest Watcher",
+  "name": "Wiki Ingest — Google Drive Watcher",
   "nodes": [
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+          "interval": [{ "field": "minutes", "minutesInterval": 15 }]
         }
       },
       "id": "schedule-trigger",
-      "name": "Every 5 minutes",
+      "name": "Every 15 minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [240, 300]
@@ -16,100 +16,197 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_pending_raw_sources",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Content-Type", "value": "application/json" }
-          ]
-        },
+        "url": "https://api.nexus.ethra.com.br/api/v1/auth/login",
         "sendBody": true,
         "bodyParameters": {
-          "parameters": []
+          "parameters": [
+            { "name": "slug", "value": "={{ $env.NEXUS_TENANT_SLUG }}" },
+            { "name": "password", "value": "={{ $env.NEXUS_TENANT_PASSWORD }}" }
+          ]
         },
         "options": {}
       },
-      "id": "fetch-pending",
-      "name": "Fetch Pending Sources",
+      "id": "login",
+      "name": "Login Nexus API",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 300],
-      "notes": "Query wiki_raw_sources WHERE status='pending' via Supabase REST API"
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "folderId": "={{ $env.GOOGLE_DRIVE_INGEST_FOLDER_ID }}",
+        "queryFilters": {
+          "filters": [
+            {
+              "name": "modifiedTime",
+              "condition": "is after",
+              "value": "={{ $now.minus(20, 'minutes').toISO() }}"
+            },
+            {
+              "name": "trashed",
+              "condition": "is equal to",
+              "value": false
+            }
+          ]
+        },
+        "options": {
+          "fields": "id,name,mimeType,modifiedTime,size"
+        }
+      },
+      "id": "list-files",
+      "name": "Listar Arquivos Novos",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [680, 300]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "" },
+          "options": { "caseSensitive": false },
           "conditions": [
             {
-              "id": "check-has-items",
-              "leftValue": "={{ $json.length }}",
-              "rightValue": "0",
+              "id": "has-files",
+              "leftValue": "={{ $json.files?.length ?? 0 }}",
+              "rightValue": 0,
               "operator": { "type": "number", "operation": "gt" }
             }
           ],
           "combinator": "and"
         }
       },
-      "id": "has-pending",
-      "name": "Has pending?",
+      "id": "has-files",
+      "name": "Tem arquivos novos?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "files",
+        "include": "selectedOtherFields",
+        "fieldsToInclude": "token",
+        "options": {}
+      },
+      "id": "split-files",
+      "name": "Para cada arquivo",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const mimeType = $json.mimeType || '';\nconst name = $json.name || '';\n\nconst mimeToFileType = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',\n  'text/markdown': 'md',\n  'text/plain': 'txt',\n  'application/vnd.google-apps.document': 'gdoc',\n};\n\nconst fileType = mimeToFileType[mimeType] || null;\n\nif (!fileType) {\n  return []; // pula tipos não suportados silenciosamente\n}\n\nreturn [{ json: { ...$json, file_type: fileType, token: $('Login Nexus API').item.json.token } }];"
+      },
+      "id": "resolve-type",
+      "name": "Resolver tipo do arquivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": "={{ $json.id }}",
+        "options": {}
+      },
+      "id": "download-file",
+      "name": "Download do arquivo",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const binaryData = $binary.data;\nif (!binaryData) throw new Error('Arquivo sem conteúdo binário');\n\nconst base64 = binaryData.data;\nconst fileName = $json.name;\nconst fileType = $json.file_type;\nconst fileId = $json.id;\nconst token = $json.token;\n\nreturn [{ json: { content_base64: base64, file_type: fileType, source_name: fileName, source_url: `https://drive.google.com/file/d/${fileId}`, source_origin: 'google_drive', token } }];"
+      },
+      "id": "prepare-payload",
+      "name": "Preparar payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 200]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://app:3000/api/task",
+        "url": "https://api.nexus.ethra.com.br/api/v1/wiki/ingest",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $json.token }}" },
             { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"agent_id\": \"{{ $json.agent_id }}\",\n  \"skill_id\": \"wiki:ingest\",\n  \"payload\": { \"source_id\": \"{{ $json.id }}\" },\n  \"activation\": \"event\",\n  \"activation_source\": \"wiki:source_added\",\n  \"triggered_by\": \"system\"\n}",
+        "jsonBody": "={\n  \"content_base64\": \"{{ $json.content_base64 }}\",\n  \"file_type\": \"{{ $json.file_type }}\",\n  \"source_name\": \"{{ $json.source_name }}\",\n  \"source_url\": \"{{ $json.source_url }}\",\n  \"source_origin\": \"{{ $json.source_origin }}\"\n}",
         "options": { "timeout": 120000 }
       },
-      "id": "trigger-ingest",
-      "name": "Trigger Ingest",
+      "id": "call-ingest",
+      "name": "POST /wiki/ingest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [920, 200],
-      "notes": "Calls AIOS Master to ingest each pending source"
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $json;\nconst sourceName = $('Preparar payload').item.json.source_name;\n\nif (result.pages_persisted > 0) {\n  return [{ json: { notify: true, message: `✅ *Wiki atualizada*\\n\\nArquivo: ${sourceName}\\nPáginas extraídas: ${result.pages_extracted}\\nPáginas salvas: ${result.pages_persisted}\\nID fonte: ${result.source_id}` } }];\n}\nreturn [{ json: { notify: false } }];"
+      },
+      "id": "check-result",
+      "name": "Verificar resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 200]
     },
     {
       "parameters": {},
-      "id": "no-items",
-      "name": "No pending sources",
+      "id": "no-files",
+      "name": "Sem arquivos novos",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [920, 400]
+      "position": [1120, 400]
     }
   ],
   "connections": {
-    "Every 5 minutes": {
-      "main": [[{ "node": "Fetch Pending Sources", "type": "main", "index": 0 }]]
+    "Every 15 minutes": {
+      "main": [[{ "node": "Login Nexus API", "type": "main", "index": 0 }]]
     },
-    "Fetch Pending Sources": {
-      "main": [[{ "node": "Has pending?", "type": "main", "index": 0 }]]
+    "Login Nexus API": {
+      "main": [[{ "node": "Listar Arquivos Novos", "type": "main", "index": 0 }]]
     },
-    "Has pending?": {
+    "Listar Arquivos Novos": {
+      "main": [[{ "node": "Tem arquivos novos?", "type": "main", "index": 0 }]]
+    },
+    "Tem arquivos novos?": {
       "main": [
-        [{ "node": "Trigger Ingest", "type": "main", "index": 0 }],
-        [{ "node": "No pending sources", "type": "main", "index": 0 }]
+        [{ "node": "Para cada arquivo", "type": "main", "index": 0 }],
+        [{ "node": "Sem arquivos novos", "type": "main", "index": 0 }]
       ]
+    },
+    "Para cada arquivo": {
+      "main": [[{ "node": "Resolver tipo do arquivo", "type": "main", "index": 0 }]]
+    },
+    "Resolver tipo do arquivo": {
+      "main": [[{ "node": "Download do arquivo", "type": "main", "index": 0 }]]
+    },
+    "Download do arquivo": {
+      "main": [[{ "node": "Preparar payload", "type": "main", "index": 0 }]]
+    },
+    "Preparar payload": {
+      "main": [[{ "node": "POST /wiki/ingest", "type": "main", "index": 0 }]]
+    },
+    "POST /wiki/ingest": {
+      "main": [[{ "node": "Verificar resultado", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "errorWorkflow": ""
   },
   "tags": [
     { "name": "wiki" },
     { "name": "ingest" },
+    { "name": "google-drive" },
     { "name": "automated" }
   ]
 }

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
-import { getDb } from '@ethra-nexus/db'
+import { getDb, wikiRawSources } from '@ethra-nexus/db'
 import {
   embed,
   generateStrategicIndex,
@@ -42,6 +42,8 @@ interface IngestBody {
   content_base64: string
   file_type: FileType
   source_name: string
+  source_url?: string
+  source_origin?: 'api' | 'google_drive' | 'upload' | 'n8n'
 }
 
 async function regenerateEmbedding(
@@ -150,12 +152,37 @@ export async function wikiRoutes(app: FastifyInstance) {
   // ── POST /wiki/ingest ─────────────────────────────────────
   // Recebe documento bruto (base64), LLM extrai N páginas estruturadas.
   // Cada página é upserted individualmente + embedding best-effort.
+  // Toda ingestão é registrada em wiki_raw_sources para rastreabilidade LGPD.
   app.post<{ Body: IngestBody }>('/wiki/ingest', async (request, reply) => {
-    const { content_base64, file_type, source_name } = request.body
+    const { content_base64, file_type, source_name, source_url, source_origin = 'api' } = request.body
     if (!content_base64 || !file_type || !source_name) {
       return reply
         .status(400)
         .send({ error: 'content_base64, file_type and source_name are required' })
+    }
+
+    // Registra a fonte imediatamente (audit trail LGPD)
+    const db = getDb()
+    const [rawSource] = await db
+      .insert(wikiRawSources)
+      .values({
+        tenant_id: request.tenantId,
+        name: source_name,
+        file_type,
+        source_url: source_url ?? null,
+        source_origin,
+        status: 'processing',
+      })
+      .returning({ id: wikiRawSources.id })
+
+    const updateSource = async (
+      status: 'done' | 'failed',
+      extra: { pages_extracted?: number; pages_persisted?: number; error_msg?: string },
+    ) => {
+      await db
+        .update(wikiRawSources)
+        .set({ status, ingested_at: new Date(), ...extra })
+        .where(sql`id = ${rawSource.id}`)
     }
 
     // 1. Decode + parse
@@ -164,12 +191,14 @@ export async function wikiRoutes(app: FastifyInstance) {
       const buffer = Buffer.from(content_base64, 'base64')
       text = await parseBuffer(buffer, file_type)
     } catch (err) {
+      await updateSource('failed', { error_msg: (err as Error).message })
       return reply
         .status(400)
         .send({ error: 'Failed to parse file', details: (err as Error).message })
     }
 
     if (text.trim().length < 50) {
+      await updateSource('failed', { error_msg: 'Parsed content is too short (< 50 chars)' })
       return reply.status(400).send({ error: 'Parsed content is too short (< 50 chars)' })
     }
 
@@ -180,6 +209,7 @@ export async function wikiRoutes(app: FastifyInstance) {
       extraction = await extractPagesFromContent(text, source_name, providerRegistry)
     } catch (err) {
       request.log.error({ err: (err as Error).message }, 'LLM extraction failed')
+      await updateSource('failed', { error_msg: `LLM: ${(err as Error).message}` })
       return reply
         .status(502)
         .send({ error: 'LLM extraction failed', details: (err as Error).message })
@@ -215,7 +245,13 @@ export async function wikiRoutes(app: FastifyInstance) {
       }
     }
 
+    await updateSource('done', {
+      pages_extracted: extraction.pages.length,
+      pages_persisted: persisted,
+    })
+
     return {
+      source_id: rawSource.id,
       pages_extracted: extraction.pages.length,
       pages_persisted: persisted,
       pages_embedded: embeddedOk,
