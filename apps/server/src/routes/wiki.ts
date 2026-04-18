@@ -9,19 +9,6 @@ import {
 import type { FileType } from '@ethra-nexus/agents'
 import { createWikiDb, createRegistryFromEnv, parseBuffer } from '@ethra-nexus/agents'
 
-// ============================================================
-// Wiki Routes — Sub-fase 5a (Opção A: index.md primário)
-//
-// Endpoints:
-//   POST /wiki/pages             — humano cria/atualiza página estratégica
-//   GET  /wiki/index/strategic   — index Markdown (LLM lê para decidir)
-//   POST /wiki/search            — RAG fallback via pgvector
-//
-// Decisão de design: criação de página é a operação primária.
-// Embedding é best-effort — falha em embedding NÃO falha o request.
-// Página fica acessível via index.md mesmo sem busca semântica.
-// ============================================================
-
 interface CreatePageBody {
   slug: string
   title: string
@@ -46,6 +33,15 @@ interface IngestBody {
   source_origin?: 'api' | 'google_drive' | 'upload' | 'n8n'
 }
 
+interface IngestStreamQuery {
+  file_type: string
+  source_name: string
+  source_url?: string
+  source_origin?: string
+}
+
+type SourceOrigin = 'api' | 'google_drive' | 'upload' | 'n8n'
+
 async function regenerateEmbedding(
   pageId: string,
   text: string,
@@ -64,8 +60,136 @@ async function regenerateEmbedding(
   }
 }
 
+type IngestResult = {
+  source_id: string
+  pages_extracted: number
+  pages_persisted: number
+  pages_embedded: number
+  pages_failed: number
+  invalid_from_llm: unknown
+  failed_persistence: string[]
+  log_entry: unknown
+}
+
+type IngestError = { status: number; body: object }
+
+async function runIngestFromBuffer(
+  wikiDb: ReturnType<typeof createWikiDb>,
+  tenantId: string,
+  buffer: Buffer,
+  params: {
+    file_type: FileType
+    source_name: string
+    source_url?: string
+    source_origin: SourceOrigin
+  },
+  log: Pick<FastifyInstance['log'], 'warn' | 'error'>,
+): Promise<{ error: IngestError } | { result: IngestResult }> {
+  const db = getDb()
+
+  const [rawSource] = await db
+    .insert(wikiRawSources)
+    .values({
+      tenant_id: tenantId,
+      name: params.source_name,
+      file_type: params.file_type,
+      source_url: params.source_url ?? null,
+      source_origin: params.source_origin,
+      status: 'processing',
+    })
+    .returning({ id: wikiRawSources.id })
+
+  const updateSource = async (
+    status: 'done' | 'failed',
+    extra: { pages_extracted?: number; pages_persisted?: number; error_msg?: string },
+  ) => {
+    await db
+      .update(wikiRawSources)
+      .set({ status, ingested_at: new Date(), ...extra })
+      .where(sql`id = ${rawSource.id}`)
+  }
+
+  let text: string
+  try {
+    text = await parseBuffer(buffer, params.file_type)
+  } catch (err) {
+    await updateSource('failed', { error_msg: (err as Error).message })
+    return { error: { status: 400, body: { error: 'Failed to parse file', details: (err as Error).message } } }
+  }
+
+  if (text.trim().length < 50) {
+    await updateSource('failed', { error_msg: 'Parsed content is too short (< 50 chars)' })
+    return { error: { status: 400, body: { error: 'Parsed content is too short (< 50 chars)' } } }
+  }
+
+  const providerRegistry = createRegistryFromEnv()
+  let extraction: Awaited<ReturnType<typeof extractPagesFromContent>>
+  try {
+    extraction = await extractPagesFromContent(text, params.source_name, providerRegistry)
+  } catch (err) {
+    log.error({ err: (err as Error).message }, 'LLM extraction failed')
+    await updateSource('failed', { error_msg: `LLM: ${(err as Error).message}` })
+    return { error: { status: 502, body: { error: 'LLM extraction failed', details: (err as Error).message } } }
+  }
+
+  let persisted = 0
+  let embeddedOk = 0
+  const failedPages: string[] = []
+
+  for (const extractedPage of extraction.pages) {
+    try {
+      const page = await wikiDb.upsertStrategicPage({
+        tenant_id: tenantId,
+        slug: extractedPage.slug,
+        title: extractedPage.title,
+        type: extractedPage.type,
+        content: extractedPage.content,
+        sources: extractedPage.sources,
+        tags: extractedPage.tags,
+        confidence: extractedPage.confidence,
+        author_type: 'agent',
+      })
+      persisted++
+
+      const embedStatus = await regenerateEmbedding(page.id, `${page.title}\n\n${page.content}`)
+      if (embedStatus.status === 'ok') embeddedOk++
+    } catch (err) {
+      failedPages.push(`${extractedPage.slug}: ${(err as Error).message}`)
+    }
+  }
+
+  await updateSource('done', {
+    pages_extracted: extraction.pages.length,
+    pages_persisted: persisted,
+  })
+
+  return {
+    result: {
+      source_id: rawSource.id,
+      pages_extracted: extraction.pages.length,
+      pages_persisted: persisted,
+      pages_embedded: embeddedOk,
+      pages_failed: failedPages.length,
+      invalid_from_llm: extraction.invalid_reasons,
+      failed_persistence: failedPages,
+      log_entry: extraction.log_entry,
+    },
+  }
+}
+
+const VALID_ORIGINS: SourceOrigin[] = ['api', 'google_drive', 'upload', 'n8n']
+
 export async function wikiRoutes(app: FastifyInstance) {
   const wikiDb = createWikiDb()
+
+  // Parser para binary types — usado por /wiki/ingest/stream (N8N filesystem mode)
+  app.addContentTypeParser(
+    ['application/pdf', 'application/octet-stream',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    { parseAs: 'buffer' },
+    (_req, body, done) => done(null, body),
+  )
 
   // ── POST /wiki/pages ───────────────────────────────────────
   app.post<{ Body: CreatePageBody }>('/wiki/pages', async (request, reply) => {
@@ -116,7 +240,6 @@ export async function wikiRoutes(app: FastifyInstance) {
 
   // ── POST /wiki/search ──────────────────────────────────────
   app.post<{ Body: SearchBody }>('/wiki/search', async (request, reply) => {
-    // threshold 0.3 é adequado para text-embedding-3-small (scores menores que ada-002)
     const { query, limit = 5, threshold = 0.3 } = request.body
     if (!query) {
       return reply.status(400).send({ error: 'query is required' })
@@ -151,7 +274,6 @@ export async function wikiRoutes(app: FastifyInstance) {
 
   // ── POST /wiki/ingest ─────────────────────────────────────
   // Recebe documento bruto (base64), LLM extrai N páginas estruturadas.
-  // Cada página é upserted individualmente + embedding best-effort.
   // Toda ingestão é registrada em wiki_raw_sources para rastreabilidade LGPD.
   app.post<{ Body: IngestBody }>('/wiki/ingest', async (request, reply) => {
     const { content_base64, file_type, source_name, source_url, source_origin = 'api' } = request.body
@@ -161,110 +283,51 @@ export async function wikiRoutes(app: FastifyInstance) {
         .send({ error: 'content_base64, file_type and source_name are required' })
     }
 
-    // Registra a fonte imediatamente (audit trail LGPD)
-    const db = getDb()
-    const [rawSource] = await db
-      .insert(wikiRawSources)
-      .values({
-        tenant_id: request.tenantId,
-        name: source_name,
-        file_type,
-        source_url: source_url ?? null,
-        source_origin,
-        status: 'processing',
-      })
-      .returning({ id: wikiRawSources.id })
+    const buffer = Buffer.from(content_base64, 'base64')
+    const out = await runIngestFromBuffer(wikiDb, request.tenantId, buffer, {
+      file_type,
+      source_name,
+      source_url,
+      source_origin,
+    }, request.log)
 
-    const updateSource = async (
-      status: 'done' | 'failed',
-      extra: { pages_extracted?: number; pages_persisted?: number; error_msg?: string },
-    ) => {
-      await db
-        .update(wikiRawSources)
-        .set({ status, ingested_at: new Date(), ...extra })
-        .where(sql`id = ${rawSource.id}`)
+    if ('error' in out) return reply.status(out.error.status).send(out.error.body)
+    return out.result
+  })
+
+  // ── POST /wiki/ingest/stream ──────────────────────────────
+  // Aceita binário raw no body + metadados via query params.
+  // Usado pelo N8N com binaryDataMode: filesystem, onde expressões
+  // não conseguem serializar $binary.data — mas specifyBody:"binaryData"
+  // usa getBinaryDataBuffer() internamente e funciona corretamente.
+  app.post<{ Querystring: IngestStreamQuery }>('/wiki/ingest/stream', async (request, reply) => {
+    const { file_type, source_name, source_url, source_origin = 'google_drive' } = request.query
+
+    if (!file_type || !source_name) {
+      return reply.status(400).send({ error: 'file_type and source_name query params are required' })
     }
 
-    // 1. Decode + parse
-    let text: string
-    try {
-      const buffer = Buffer.from(content_base64, 'base64')
-      text = await parseBuffer(buffer, file_type)
-    } catch (err) {
-      await updateSource('failed', { error_msg: (err as Error).message })
-      return reply
-        .status(400)
-        .send({ error: 'Failed to parse file', details: (err as Error).message })
+    const origin: SourceOrigin = VALID_ORIGINS.includes(source_origin as SourceOrigin)
+      ? (source_origin as SourceOrigin)
+      : 'google_drive'
+
+    const buffer = request.body as Buffer
+    if (!buffer || buffer.length === 0) {
+      return reply.status(400).send({ error: 'Empty request body' })
     }
 
-    if (text.trim().length < 50) {
-      await updateSource('failed', { error_msg: 'Parsed content is too short (< 50 chars)' })
-      return reply.status(400).send({ error: 'Parsed content is too short (< 50 chars)' })
-    }
+    const out = await runIngestFromBuffer(wikiDb, request.tenantId, buffer, {
+      file_type: file_type as FileType,
+      source_name,
+      source_url,
+      source_origin: origin,
+    }, request.log)
 
-    // 2. LLM extraction (Anthropic Sonnet — LGPD)
-    const providerRegistry = createRegistryFromEnv()
-    let extraction: Awaited<ReturnType<typeof extractPagesFromContent>>
-    try {
-      extraction = await extractPagesFromContent(text, source_name, providerRegistry)
-    } catch (err) {
-      request.log.error({ err: (err as Error).message }, 'LLM extraction failed')
-      await updateSource('failed', { error_msg: `LLM: ${(err as Error).message}` })
-      return reply
-        .status(502)
-        .send({ error: 'LLM extraction failed', details: (err as Error).message })
-    }
-
-    // 3. Upsert cada página (best-effort)
-    let persisted = 0
-    let embeddedOk = 0
-    const failedPages: string[] = []
-
-    for (const extractedPage of extraction.pages) {
-      try {
-        const page = await wikiDb.upsertStrategicPage({
-          tenant_id: request.tenantId,
-          slug: extractedPage.slug,
-          title: extractedPage.title,
-          type: extractedPage.type,
-          content: extractedPage.content,
-          sources: extractedPage.sources,
-          tags: extractedPage.tags,
-          confidence: extractedPage.confidence,
-          author_type: 'agent',
-        })
-        persisted++
-
-        const embedStatus = await regenerateEmbedding(
-          page.id,
-          `${page.title}\n\n${page.content}`,
-        )
-        if (embedStatus.status === 'ok') embeddedOk++
-      } catch (err) {
-        failedPages.push(`${extractedPage.slug}: ${(err as Error).message}`)
-      }
-    }
-
-    await updateSource('done', {
-      pages_extracted: extraction.pages.length,
-      pages_persisted: persisted,
-    })
-
-    return {
-      source_id: rawSource.id,
-      pages_extracted: extraction.pages.length,
-      pages_persisted: persisted,
-      pages_embedded: embeddedOk,
-      pages_failed: failedPages.length,
-      invalid_from_llm: extraction.invalid_reasons,
-      failed_persistence: failedPages,
-      log_entry: extraction.log_entry,
-    }
+    if ('error' in out) return reply.status(out.error.status).send(out.error.body)
+    return out.result
   })
 
   // ── POST /wiki/pages/:id/reembed ──────────────────────────
-  // Re-tenta gerar embedding para uma página existente.
-  // Útil quando OPENAI_API_KEY estava inválida no momento da criação.
   app.post<{ Params: { id: string } }>(
     '/wiki/pages/:id/reembed',
     async (request, reply) => {
