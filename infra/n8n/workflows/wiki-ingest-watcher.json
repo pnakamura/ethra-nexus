@@ -34,11 +34,17 @@
     },
     {
       "parameters": {
-        "operation": "search",
-        "filter": "'1-AQIJtJ0ozpL9S03ZtElOqUOrEF-vf2T' in parents and trashed = false",
-        "options": {
-          "fields": "id,name,mimeType,modifiedTime"
-        }
+        "resource": "fileFolder",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "1-AQIJtJ0ozpL9S03ZtElOqUOrEF-vf2T",
+            "mode": "list",
+            "cachedResultName": "Conhecimento",
+            "cachedResultUrl": "https://drive.google.com/drive/folders/1-AQIJtJ0ozpL9S03ZtElOqUOrEF-vf2T"
+          }
+        },
+        "options": {}
       },
       "id": "list-files",
       "name": "Listar Arquivos Novos",
@@ -53,7 +59,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const token = $('Login Nexus API').item.json.token;\nconst cutoff = new Date(Date.now() - 20 * 60 * 1000);\n\nconst mimeToFileType = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',\n  'text/markdown': 'md',\n  'text/plain': 'txt'\n};\n\nconst results = [];\nfor (const item of $input.all()) {\n  const file = item.json;\n  const modified = new Date(file.modifiedTime);\n  if (modified < cutoff) continue;\n  const fileType = mimeToFileType[file.mimeType];\n  if (!fileType) continue;\n  results.push({ json: { ...file, file_type: fileType, token } });\n}\n\nreturn results;"
+        "jsCode": "const token = $('Login Nexus API').item.json.token;\nconst cutoff = new Date(Date.now() - 20 * 60 * 1000);\n\nconst mimeToFileType = {\n  'application/pdf': 'pdf',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',\n  'text/markdown': 'md',\n  'text/plain': 'txt'\n};\n\nconst results = [];\nfor (const item of $input.all()) {\n  const file = item.json;\n  const modified = file.modifiedTime ? new Date(file.modifiedTime) : null;\n  if (modified && modified < cutoff) continue;\n  const fileType = mimeToFileType[file.mimeType];\n  if (!fileType) continue;\n  results.push({ json: { ...file, file_type: fileType, token } });\n}\n\nreturn results;"
       },
       "id": "filter-recent",
       "name": "Filtrar recentes e tipo suportado",
@@ -85,7 +91,11 @@
     {
       "parameters": {
         "operation": "download",
-        "fileId": "={{ $json.id }}",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
         "options": {}
       },
       "id": "download-file",
@@ -101,7 +111,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const binaryKey = Object.keys($binary)[0];\nif (!binaryKey) throw new Error('Arquivo sem conteúdo binário');\n\nconst base64 = $binary[binaryKey].data;\nconst fileName = $json.name;\nconst fileType = $json.file_type;\nconst fileId = $json.id;\nconst token = $json.token;\n\nreturn [{ json: {\n  content_base64: base64,\n  file_type: fileType,\n  source_name: fileName,\n  source_url: `https://drive.google.com/file/d/${fileId}`,\n  source_origin: 'google_drive',\n  token\n} }];"
+        "jsCode": "const binaryKey = Object.keys($binary)[0];\nif (!binaryKey) throw new Error('Arquivo sem conteúdo binário: ' + $json.name);\n\nconst base64 = $binary[binaryKey].data;\nconst fileName = $json.name;\nconst fileType = $json.file_type;\nconst fileId = $json.id;\nconst token = $json.token;\n\nreturn [{ json: {\n  content_base64: base64,\n  file_type: fileType,\n  source_name: fileName,\n  source_url: `https://drive.google.com/file/d/${fileId}`,\n  source_origin: 'google_drive',\n  token\n} }];"
       },
       "id": "prepare-payload",
       "name": "Preparar payload",
@@ -165,12 +175,6 @@
       "main": [[{ "node": "POST /wiki/ingest", "type": "main", "index": 0 }]]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "tags": [
-    { "name": "wiki" },
-    { "name": "ingest" },
-    { "name": "google-drive" }
-  ]
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "wiki" }, { "name": "ingest" }, { "name": "google-drive" }]
 }
