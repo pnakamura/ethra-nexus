@@ -69,13 +69,47 @@
     },
     {
       "parameters": {
-        "jsCode": "// fetch não está disponível no task runner VM — usa require('https')\nconst https = require('https');\n\nfunction httpsPost(url, payload, headers) {\n  return new Promise((resolve, reject) => {\n    const u = new URL(url);\n    const body = JSON.stringify(payload);\n    const req = https.request({\n      hostname: u.hostname,\n      port: 443,\n      path: u.pathname,\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body), ...headers }\n    }, res => {\n      let data = '';\n      res.on('data', c => data += c);\n      res.on('end', () => {\n        if (res.statusCode >= 200 && res.statusCode < 300) resolve(JSON.parse(data));\n        else reject(new Error('HTTP ' + res.statusCode + ': ' + data));\n      });\n    });\n    req.on('error', reject);\n    req.write(body);\n    req.end();\n  });\n}\n\nconst allItems = $input.all();\nif (allItems.length === 0) return [];\n\nconst token = $('Login Nexus API').first().json.token;\n\nconst files = allItems.map(item => ({\n  source_url: 'https://drive.google.com/file/d/' + item.json.id + '/view',\n  modified_time: item.json.modifiedTime || new Date(0).toISOString()\n}));\n\nconst { to_process } = await httpsPost(\n  'https://api.nexus.ethra.com.br/api/v1/wiki/sources/check-new',\n  { files },\n  { Authorization: 'Bearer ' + token }\n);\n\nconst processSet = new Set(to_process.map(f => f.source_url));\n\nreturn allItems.filter(item => {\n  const url = 'https://drive.google.com/file/d/' + item.json.id + '/view';\n  return processSet.has(url);\n});"
+        "jsCode": "// Agrega todos os itens em um único payload para o check-new\nconst allItems = $input.all();\nif (allItems.length === 0) return [{ json: { files: [] } }];\n\nconst files = allItems.map(item => ({\n  source_url: 'https://drive.google.com/file/d/' + item.json.id + '/view',\n  modified_time: item.json.modifiedTime || new Date(0).toISOString()\n}));\n\nreturn [{ json: { files } }];"
+      },
+      "id": "aggregate-check",
+      "name": "Agregar para check-new",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.nexus.ethra.com.br/api/v1/wiki/sources/check-new",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Login Nexus API').item.json.token }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "files", "value": "={{ $json.files }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-check-new",
+      "name": "POST /wiki/sources/check-new",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtra os itens originais mantendo apenas os que o servidor indicou processar\nconst to_process = $json.to_process || [];\nconst processSet = new Set(to_process.map(f => f.source_url));\n\nreturn $('Filtrar recentes e tipo suportado').all().filter(item => {\n  const url = 'https://drive.google.com/file/d/' + item.json.id + '/view';\n  return processSet.has(url);\n});"
       },
       "id": "dedup-filter",
       "name": "Filtrar já processados",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1010, 300]
+      "position": [1420, 300]
     },
     {
       "parameters": {
@@ -96,7 +130,7 @@
       "name": "Tem arquivos novos?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1230, 300]
+      "position": [1600, 300]
     },
     {
       "parameters": {
@@ -112,7 +146,7 @@
       "name": "Download do arquivo",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [1340, 200],
+      "position": [1780, 200],
       "credentials": {
         "googleDriveOAuth2Api": {
           "name": "Google Drive Nexus"
@@ -121,13 +155,13 @@
     },
     {
       "parameters": {
-        "jsCode": "// Converte binário (filesystem ou memória) para base64\n// e monta o payload para /wiki/ingest\nconst downloadItems = $input.all();\nconst filterItems = $('Filtrar recentes e tipo suportado').all();\nconst results = [];\n\nfor (let i = 0; i < downloadItems.length; i++) {\n  const item = downloadItems[i];\n  const filterItem = filterItems[i]?.json;\n  if (!filterItem) continue;\n\n  const binary = item.binary;\n  let content_base64 = null;\n  const debug = { hasBinary: !!binary, binaryKeys: [], source: null, error: null };\n\n  if (binary) {\n    debug.binaryKeys = Object.keys(binary);\n    const binaryKey = Object.keys(binary)[0];\n    if (binaryKey) {\n      const bd = binary[binaryKey];\n      debug.mimeType = bd.mimeType;\n      debug.fileName = bd.fileName;\n      debug.binaryId = bd.id;\n      debug.dataLength = (bd.data || '').length;\n\n      if (bd.data && bd.data.length > 0) {\n        // Modo memória: data já é base64\n        content_base64 = bd.data;\n        debug.source = 'memory';\n      } else if (bd.id) {\n        // Modo filesystem: lê diretamente do disco\n        try {\n          const fs = require('fs');\n          const p = '/home/node/.n8n/binaryData/' + bd.id;\n          const buf = fs.readFileSync(p);\n          content_base64 = buf.toString('base64');\n          debug.source = 'filesystem';\n          debug.diskSize = buf.length;\n        } catch (e) {\n          debug.error = e.message;\n        }\n      }\n    }\n  }\n\n  if (!content_base64) {\n    throw new Error('Falha ao ler binário de ' + filterItem.name + ': ' + JSON.stringify(debug));\n  }\n\n  results.push({\n    json: {\n      content_base64,\n      file_type: filterItem.file_type,\n      source_name: filterItem.name,\n      source_url: 'https://drive.google.com/file/d/' + filterItem.id + '/view',\n      source_origin: 'google_drive'\n    }\n  });\n}\n\nreturn results;"
+        "jsCode": "// Converte binário (filesystem ou memória) para base64\n// e monta o payload para /wiki/ingest\nconst downloadItems = $input.all();\nconst filterItems = $('Filtrar já processados').all();\nconst results = [];\n\nfor (let i = 0; i < downloadItems.length; i++) {\n  const item = downloadItems[i];\n  const filterItem = filterItems[i]?.json;\n  if (!filterItem) continue;\n\n  const binary = item.binary;\n  let content_base64 = null;\n  const debug = { hasBinary: !!binary, binaryKeys: [], source: null, error: null };\n\n  if (binary) {\n    debug.binaryKeys = Object.keys(binary);\n    const binaryKey = Object.keys(binary)[0];\n    if (binaryKey) {\n      const bd = binary[binaryKey];\n      debug.mimeType = bd.mimeType;\n      debug.fileName = bd.fileName;\n      debug.binaryId = bd.id;\n      debug.dataLength = (bd.data || '').length;\n\n      if (bd.data && bd.data.length > 0) {\n        content_base64 = bd.data;\n        debug.source = 'memory';\n      } else if (bd.id) {\n        try {\n          const fs = require('fs');\n          const p = '/home/node/.n8n/binaryData/' + bd.id;\n          const buf = fs.readFileSync(p);\n          content_base64 = buf.toString('base64');\n          debug.source = 'filesystem';\n          debug.diskSize = buf.length;\n        } catch (e) {\n          debug.error = e.message;\n        }\n      }\n    }\n  }\n\n  if (!content_base64) {\n    throw new Error('Falha ao ler binário de ' + filterItem.name + ': ' + JSON.stringify(debug));\n  }\n\n  results.push({\n    json: {\n      content_base64,\n      file_type: filterItem.file_type,\n      source_name: filterItem.name,\n      source_url: 'https://drive.google.com/file/d/' + filterItem.id + '/view',\n      source_origin: 'google_drive'\n    }\n  });\n}\n\nreturn results;"
       },
       "id": "prepare-ingest",
       "name": "Preparar body para ingest",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1560, 200]
+      "position": [2000, 200]
     },
     {
       "parameters": {
@@ -155,7 +189,7 @@
       "name": "POST /wiki/ingest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1780, 200]
+      "position": [2220, 200]
     },
     {
       "parameters": {},
@@ -163,7 +197,7 @@
       "name": "Sem arquivos novos",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1340, 400]
+      "position": [1780, 400]
     }
   ],
   "connections": {
@@ -177,6 +211,12 @@
       "main": [[{ "node": "Filtrar recentes e tipo suportado", "type": "main", "index": 0 }]]
     },
     "Filtrar recentes e tipo suportado": {
+      "main": [[{ "node": "Agregar para check-new", "type": "main", "index": 0 }]]
+    },
+    "Agregar para check-new": {
+      "main": [[{ "node": "POST /wiki/sources/check-new", "type": "main", "index": 0 }]]
+    },
+    "POST /wiki/sources/check-new": {
       "main": [[{ "node": "Filtrar já processados", "type": "main", "index": 0 }]]
     },
     "Filtrar já processados": {
