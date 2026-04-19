@@ -1,0 +1,30 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Turbo cache — causes stale builds inside Docker
+.turbo
+**/.turbo
+
+# Compiled output — rebuilt inside Docker
+dist
+**/dist
+
+# Dev / test artifacts
+*.test.ts
+*.spec.ts
+coverage
+**/.vitest
+
+# Git / IDE
+.git
+.gitignore
+.github
+.vscode
+.claude
+
+# Docs / misc
+docs
+wikis
+*.md
+*.log
