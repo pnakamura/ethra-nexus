@@ -1,5 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm'
-import { getDb, agents, budgets, providerUsageLog, auditLog } from '@ethra-nexus/db'
+import { getDb, agents, budgets, providerUsageLog, auditLog, aiosEvents } from '@ethra-nexus/db'
 
 // ============================================================
 // DB Agents — queries Drizzle para o orquestrador
@@ -150,6 +150,60 @@ export function createAgentsDb() {
         }
       }
       return { allowed: true }
+    },
+
+    async insertAiosEvent(event: {
+      tenant_id: string
+      agent_id: string | null
+      skill_id: string
+      activation_mode: string
+      payload: Record<string, unknown>
+      triggered_by?: string | null
+      user_ip?: string | null
+      user_agent?: string | null
+    }): Promise<string> {
+      const result = await db
+        .insert(aiosEvents)
+        .values({
+          tenant_id: event.tenant_id,
+          agent_id: event.agent_id ?? undefined,
+          skill_id: event.skill_id,
+          activation_mode: event.activation_mode,
+          payload: event.payload,
+          triggered_by: event.triggered_by ?? null,
+          user_ip: event.user_ip ?? null,
+          user_agent: event.user_agent ?? null,
+          status: 'running',
+          triggered_at: new Date(),
+          started_at: new Date(),
+        })
+        .returning({ id: aiosEvents.id })
+      return result[0]!.id
+    },
+
+    async updateAiosEvent(
+      eventId: string,
+      update: {
+        status: 'ok' | 'error'
+        result?: Record<string, unknown>
+        error_code?: string
+        retryable?: boolean
+        tokens_used?: number
+        cost_usd?: number
+      },
+    ) {
+      await db
+        .update(aiosEvents)
+        .set({
+          status: update.status,
+          result: update.result ?? null,
+          error_code: update.error_code ?? null,
+          retryable: update.retryable ?? false,
+          tokens_used: update.tokens_used ?? 0,
+          cost_usd: update.cost_usd != null ? update.cost_usd.toFixed(6) : '0',
+          completed_at: new Date(),
+        })
+        .where(eq(aiosEvents.id, eventId))
     },
   }
 }
