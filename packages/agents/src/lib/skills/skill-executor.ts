@@ -84,9 +84,7 @@ async function executeWikiQuery(
   }
 
   const systemPrompt =
-    (input.system_prompt ??
-      agent.system_prompt ||
-      'Você é um assistente de IA. Responda em português de forma clara e objetiva.') +
+    (input.system_prompt ?? (agent.system_prompt || 'Você é um assistente de IA. Responda em português de forma clara e objetiva.')) +
     (wikiContext ? `\n\n## Base de conhecimento:\n${wikiContext}` : '')
 
   const registry = createRegistryFromEnv()
