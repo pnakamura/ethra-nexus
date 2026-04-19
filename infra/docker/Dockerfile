@@ -30,8 +30,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build todos os packages e o app
-RUN npm run build
+# Build todos os packages e o app (--force ignora cache do Turbo)
+RUN npx turbo run build --force
 
 # ---
 
