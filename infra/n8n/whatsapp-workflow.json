@@ -1,5 +1,6 @@
 {
   "name": "WhatsApp — Ethra Nexus",
+  "_comment": "N8N Variables required: NEXUS_API_URL, NEXUS_SLUG, NEXUS_PASSWORD, NEXUS_AGENT_ID, EVOLUTION_API_URL, EVOLUTION_INSTANCE, EVOLUTION_API_KEY",
   "nodes": [
     {
       "parameters": {
@@ -17,9 +18,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body;\nconst data = body?.data;\n\nif (!data || data.key?.fromMe) return [];\n\nconst text = (\n  data.message?.conversation ||\n  data.message?.extendedTextMessage?.text ||\n  ''\n).trim();\n\nif (!text) return [];\n\nconst from = data.key?.remoteJid || '';\nconst args = text.split(' ').slice(1).join(' ');\n\nlet replyText = '';\nlet needsSearch = false;\nlet searchQuery = '';\n\nif (text.startsWith('/ajuda')) {\n  replyText =\n    '🤖 *Ethra Nexus — Comandos disponíveis*\\n\\n' +\n    '/ajuda — esta mensagem\\n' +\n    '/status — status do sistema\\n' +\n    '/agentes — lista de agentes ativos\\n' +\n    '/buscar [termo] — busca na wiki\\n' +\n    '/aprovar [id] — aprova uma tarefa pendente';\n\n} else if (text.startsWith('/status')) {\n  replyText = '✅ *Status Ethra Nexus*\\n\\nServidor: online\\nVersão: 1.0.0';\n\n} else if (text.startsWith('/agentes')) {\n  replyText = '🤖 *Agentes*\\n\\nIntegração em configuração. Em breve disponível.';\n\n} else if (text.startsWith('/buscar')) {\n  if (!args) {\n    replyText = '🔍 Uso: /buscar [termo]\\nEx: /buscar política de pagamento';\n  } else {\n    needsSearch = true;\n    searchQuery = args;\n  }\n\n} else if (text.startsWith('/aprovar')) {\n  replyText = args\n    ? `✅ Aprovação solicitada para: ${args}\\n\\n⚙️ Integração com tickets em configuração.`\n    : '✅ Uso: /aprovar [id-da-tarefa]';\n\n} else {\n  replyText = '❓ Comando não reconhecido.\\n\\nDigite /ajuda para ver os comandos disponíveis.';\n}\n\nreturn [{ json: { from, replyText, needsSearch, searchQuery } }];"
+        "jsCode": "const body = $input.first().json.body;\nconst data = body?.data;\nif (!data || data.key?.fromMe) return [];\nconst text = (data.message?.conversation || data.message?.extendedTextMessage?.text || '').trim();\nif (!text) return [];\nconst from = data.key?.remoteJid || '';\nconst parts = text.split(' ');\nconst cmd = parts[0].toLowerCase();\nconst args = parts.slice(1).join(' ').trim();\nlet actionType = 'direct';\nlet replyText = '';\nlet searchQuery = '';\nlet askQuery = '';\nlet apiPath = '';\nlet apiBody = null;\nif (cmd === '/ajuda') {\n  replyText = 'Ethra Nexus — Comandos:\\n\\n/buscar [termo]\\n/pergunta [texto]\\n/tarefas\\n/ver [id]\\n/aprovar [id]\\n/rejeitar [id] [motivo]\\n/wiki-pendentes\\n/aprovar-wiki [id]\\n/rejeitar-wiki [id] [motivo]\\n/status';\n} else if (cmd === '/status') {\n  replyText = 'Status: online';\n} else if (cmd === '/buscar') {\n  if (!args) { replyText = 'Uso: /buscar [termo]'; }\n  else { actionType = 'search'; searchQuery = args; }\n} else if (cmd === '/pergunta') {\n  if (!args) { replyText = 'Uso: /pergunta [texto]'; }\n  else { actionType = 'ask'; askQuery = args; }\n} else if (cmd === '/tarefas') {\n  actionType = 'get'; apiPath = '/api/v1/tickets?status=pending_approval&limit=10';\n} else if (cmd === '/ver') {\n  if (!args) { replyText = 'Uso: /ver [id]'; }\n  else { actionType = 'get'; apiPath = '/api/v1/tickets/' + args; }\n} else if (cmd === '/aprovar') {\n  if (!args) { replyText = 'Uso: /aprovar [id]'; }\n  else { actionType = 'post'; apiPath = '/api/v1/tickets/' + args + '/approve'; apiBody = {}; }\n} else if (cmd === '/rejeitar') {\n  const argParts = args.split(' ');\n  const ticketId = argParts[0];\n  const reason = argParts.slice(1).join(' ');\n  if (!ticketId) { replyText = 'Uso: /rejeitar [id] [motivo]'; }\n  else { actionType = 'post'; apiPath = '/api/v1/tickets/' + ticketId + '/reject'; apiBody = { rejection_reason: reason || 'Rejeitado' }; }\n} else if (cmd === '/wiki-pendentes') {\n  actionType = 'get'; apiPath = '/api/v1/wiki/agent-writes/pending';\n} else if (cmd === '/aprovar-wiki') {\n  if (!args) { replyText = 'Uso: /aprovar-wiki [id]'; }\n  else { actionType = 'post'; apiPath = '/api/v1/wiki/agent-writes/' + args + '/approve'; apiBody = {}; }\n} else if (cmd === '/rejeitar-wiki') {\n  const argParts = args.split(' ');\n  const writeId = argParts[0];\n  const reason = argParts.slice(1).join(' ');\n  if (!writeId) { replyText = 'Uso: /rejeitar-wiki [id] [motivo]'; }\n  else { actionType = 'post'; apiPath = '/api/v1/wiki/agent-writes/' + writeId + '/reject'; apiBody = { reason: reason || '' }; }\n} else {\n  replyText = 'Comando nao reconhecido. Use /ajuda.';\n}\nreturn [{ json: { from, actionType, replyText, searchQuery, askQuery, apiPath, apiBody } }];"
       },
-      "id": "node-code",
+      "id": "node-parse",
       "name": "Parse Comando",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -28,16 +29,17 @@
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "string": [
             {
-              "value1": "={{ $json.needsSearch }}",
-              "value2": true
+              "value1": "={{ $json.actionType }}",
+              "operation": "equal",
+              "value2": "direct"
             }
           ]
         }
       },
-      "id": "node-if",
-      "name": "Precisa Buscar?",
+      "id": "node-if-direct",
+      "name": "É Direto?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [640, 400]
@@ -45,93 +47,11 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.nexus.ethra.com.br/api/v1/auth/login",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            { "name": "slug", "value": "minha-org" },
-            { "name": "password", "value": "minha-org" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "node-login",
-      "name": "Login API",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [860, 240]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.nexus.ethra.com.br/api/v1/wiki/search",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendText/' + $env.EVOLUTION_INSTANCE }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $('Login API').item.json.token }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            { "name": "query", "value": "={{ $('Parse Comando').item.json.searchQuery }}" },
-            { "name": "limit", "value": "3" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "node-search",
-      "name": "Buscar Wiki",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [1080, 240]
-    },
-    {
-      "parameters": {
-        "jsCode": "const results = $input.first().json.data || [];\nconst from = $('Parse Comando').item.json.from;\nconst query = $('Parse Comando').item.json.searchQuery;\n\nif (results.length === 0) {\n  return [{ json: { from, replyText: `🔍 Nenhum resultado encontrado para: \"${query}\"` } }];\n}\n\nconst lines = results.map((r, i) =>\n  `${i + 1}. *${r.title}* (${r.type})`\n);\nconst replyText = `🔍 *Resultados para \"${query}\":*\\n\\n${lines.join('\\n')}`;\nreturn [{ json: { from, replyText } }];"
-      },
-      "id": "node-format",
-      "name": "Formatar Resultados",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1300, 240]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://evolution.nexus.ethra.com.br/message/sendText/ethra-whatsapp",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "apikey", "value": "NexusEvolution2026!" }
-          ]
-        },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            { "name": "number", "value": "={{ $json.from }}" },
-            { "name": "text", "value": "={{ $json.replyText }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "node-send-search",
-      "name": "Enviar Resultado Busca",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
-      "position": [1520, 240]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://evolution.nexus.ethra.com.br/message/sendText/ethra-whatsapp",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "apikey", "value": "NexusEvolution2026!" }
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" }
           ]
         },
         "sendBody": true,
@@ -144,42 +64,327 @@
         "options": {}
       },
       "id": "node-send-direct",
-      "name": "Enviar Resposta Direta",
+      "name": "Enviar Direta",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [860, 560]
+      "position": [860, 640]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NEXUS_API_URL + '/api/v1/auth/login' }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "slug", "value": "={{ $env.NEXUS_SLUG }}" },
+            { "name": "password", "value": "={{ $env.NEXUS_PASSWORD }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-login",
+      "name": "Login API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [860, 160]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Parse Comando').item.json.actionType }}",
+              "operation": "equal",
+              "value2": "search"
+            }
+          ]
+        }
+      },
+      "id": "node-if-search",
+      "name": "É Busca?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1080, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NEXUS_API_URL + '/api/v1/wiki/search' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Login API').item.json.token }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "query", "value": "={{ $('Parse Comando').item.json.searchQuery }}" },
+            { "name": "limit", "value": "5" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-search",
+      "name": "Buscar Wiki",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1300, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.data || [];\nconst from = $('Parse Comando').item.json.from;\nconst query = $('Parse Comando').item.json.searchQuery;\nif (results.length === 0) {\n  return [{ json: { from, replyText: 'Nenhum resultado para: ' + query } }];\n}\nconst lines = results.map((r, i) => (i+1) + '. ' + r.title + ' (' + r.type + ')');\nreturn [{ json: { from, replyText: 'Resultados para \"' + query + '\":\\n\\n' + lines.join('\\n') } }];"
+      },
+      "id": "node-format-search",
+      "name": "Formatar Busca",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendText/' + $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $json.from }}" },
+            { "name": "text", "value": "={{ $json.replyText }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-send-search",
+      "name": "Enviar Busca",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1740, 40]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Parse Comando').item.json.actionType }}",
+              "operation": "equal",
+              "value2": "ask"
+            }
+          ]
+        }
+      },
+      "id": "node-if-ask",
+      "name": "É Pergunta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1300, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NEXUS_API_URL + '/api/v1/agents/' + $env.NEXUS_AGENT_ID + '/ask' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Login API').item.json.token }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "question", "value": "={{ $('Parse Comando').item.json.askQuery }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-ask",
+      "name": "Perguntar Agente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1520, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendText/' + $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $('Parse Comando').item.json.from }}" },
+            { "name": "text", "value": "={{ $json.answer || $json.error || 'Nao foi possivel obter resposta.' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-send-ask",
+      "name": "Enviar Pergunta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1740, 180]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Parse Comando').item.json.actionType }}",
+              "operation": "equal",
+              "value2": "get"
+            }
+          ]
+        }
+      },
+      "id": "node-if-get",
+      "name": "É Get?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1520, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = $input.first().json.token;\nconst parsed = $('Parse Comando').item.json;\nconst baseUrl = $env.NEXUS_API_URL;\nconst response = await fetch(baseUrl + parsed.apiPath, {\n  headers: { 'Authorization': 'Bearer ' + token }\n});\nconst result = await response.json();\nconst from = parsed.from;\nconst apiPath = parsed.apiPath;\nlet replyText;\nif (!response.ok) {\n  replyText = 'Erro ' + response.status + ': ' + (result.error || 'Falha');\n} else if (apiPath.includes('tickets?')) {\n  const list = result.data || [];\n  if (list.length === 0) {\n    replyText = 'Nenhuma tarefa pendente.';\n  } else {\n    const lines = list.slice(0, 8).map((t, i) => (i+1) + '. ' + t.title + '\\n   ID: ' + t.id.slice(0,8) + '...');\n    replyText = '*Tarefas pendentes:*\\n\\n' + lines.join('\\n\\n') + '\\n\\nUse /ver [id]';\n  }\n} else if (apiPath.includes('/tickets/') && !apiPath.includes('?')) {\n  const t = result.data || result;\n  if (!t || !t.id) {\n    replyText = 'Tarefa nao encontrada.';\n  } else {\n    replyText = '*' + t.title + '*\\nStatus: ' + t.status + '\\nID: ' + t.id;\n    if (t.description) replyText += '\\nDesc: ' + t.description;\n  }\n} else if (apiPath.includes('agent-writes')) {\n  const list = result.data || [];\n  if (list.length === 0) {\n    replyText = 'Nenhum conhecimento pendente.';\n  } else {\n    const lines = list.slice(0, 8).map((w, i) => (i+1) + '. ' + w.title + ' (' + w.type + ')\\n   ID: ' + w.id.slice(0,8) + '...');\n    replyText = '*Conhecimentos pendentes:*\\n\\n' + lines.join('\\n\\n');\n  }\n} else {\n  replyText = JSON.stringify(result).slice(0, 400);\n}\nreturn [{ json: { from, replyText } }];"
+      },
+      "id": "node-exec-get",
+      "name": "Executar GET",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1740, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendText/' + $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $json.from }}" },
+            { "name": "text", "value": "={{ $json.replyText }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-send-get",
+      "name": "Enviar GET",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1960, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = $input.first().json.token;\nconst parsed = $('Parse Comando').item.json;\nconst baseUrl = $env.NEXUS_API_URL;\nconst response = await fetch(baseUrl + parsed.apiPath, {\n  method: 'POST',\n  headers: {\n    'Authorization': 'Bearer ' + token,\n    'Content-Type': 'application/json'\n  },\n  body: JSON.stringify(parsed.apiBody || {})\n});\nconst result = await response.json();\nconst from = parsed.from;\nconst apiPath = parsed.apiPath;\nlet replyText;\nif (!response.ok) {\n  replyText = 'Erro ' + response.status + ': ' + (result.error || 'Falha');\n} else if (apiPath.includes('/approve')) {\n  replyText = 'Aprovado com sucesso!';\n} else if (apiPath.includes('/reject')) {\n  replyText = 'Rejeitado.';\n} else {\n  replyText = 'Acao realizada.';\n}\nreturn [{ json: { from, replyText } }];"
+      },
+      "id": "node-exec-post",
+      "name": "Executar POST",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1740, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendText/' + $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "number", "value": "={{ $json.from }}" },
+            { "name": "text", "value": "={{ $json.replyText }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-send-post",
+      "name": "Enviar POST",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1960, 500]
     }
   ],
   "connections": {
     "Webhook": {
       "main": [
-        [{"node": "Parse Comando", "type": "main", "index": 0}]
+        [{ "node": "Parse Comando", "type": "main", "index": 0 }]
       ]
     },
     "Parse Comando": {
       "main": [
-        [{"node": "Precisa Buscar?", "type": "main", "index": 0}]
+        [{ "node": "É Direto?", "type": "main", "index": 0 }]
       ]
     },
-    "Precisa Buscar?": {
+    "É Direto?": {
       "main": [
-        [{"node": "Login API", "type": "main", "index": 0}],
-        [{"node": "Enviar Resposta Direta", "type": "main", "index": 0}]
+        [{ "node": "Enviar Direta", "type": "main", "index": 0 }],
+        [{ "node": "Login API", "type": "main", "index": 0 }]
       ]
     },
     "Login API": {
       "main": [
-        [{"node": "Buscar Wiki", "type": "main", "index": 0}]
+        [{ "node": "É Busca?", "type": "main", "index": 0 }]
+      ]
+    },
+    "É Busca?": {
+      "main": [
+        [{ "node": "Buscar Wiki", "type": "main", "index": 0 }],
+        [{ "node": "É Pergunta?", "type": "main", "index": 0 }]
       ]
     },
     "Buscar Wiki": {
       "main": [
-        [{"node": "Formatar Resultados", "type": "main", "index": 0}]
+        [{ "node": "Formatar Busca", "type": "main", "index": 0 }]
       ]
     },
-    "Formatar Resultados": {
+    "Formatar Busca": {
       "main": [
-        [{"node": "Enviar Resultado Busca", "type": "main", "index": 0}]
+        [{ "node": "Enviar Busca", "type": "main", "index": 0 }]
+      ]
+    },
+    "É Pergunta?": {
+      "main": [
+        [{ "node": "Perguntar Agente", "type": "main", "index": 0 }],
+        [{ "node": "É Get?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Perguntar Agente": {
+      "main": [
+        [{ "node": "Enviar Pergunta", "type": "main", "index": 0 }]
+      ]
+    },
+    "É Get?": {
+      "main": [
+        [{ "node": "Executar GET", "type": "main", "index": 0 }],
+        [{ "node": "Executar POST", "type": "main", "index": 0 }]
+      ]
+    },
+    "Executar GET": {
+      "main": [
+        [{ "node": "Enviar GET", "type": "main", "index": 0 }]
+      ]
+    },
+    "Executar POST": {
+      "main": [
+        [{ "node": "Enviar POST", "type": "main", "index": 0 }]
       ]
     }
   },

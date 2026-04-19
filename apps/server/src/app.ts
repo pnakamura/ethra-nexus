@@ -9,6 +9,7 @@ import { authRoutes } from './routes/auth'
 import { agentRoutes } from './routes/agents'
 import { ticketRoutes } from './routes/tickets'
 import { wikiRoutes } from './routes/wiki'
+import { wikiAgentWritesRoutes } from './routes/wiki-agent-writes'
 
 // ============================================================
 // Ethra Nexus — Fastify Application
@@ -70,6 +71,7 @@ export async function buildApp() {
   await app.register(agentRoutes, { prefix: '/api/v1' })
   await app.register(ticketRoutes, { prefix: '/api/v1' })
   await app.register(wikiRoutes, { prefix: '/api/v1' })
+  await app.register(wikiAgentWritesRoutes, { prefix: '/api/v1' })
 
   return app
 }

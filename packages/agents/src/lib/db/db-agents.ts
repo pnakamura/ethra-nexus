@@ -122,5 +122,34 @@ export function createAgentsDb() {
         user_ip: entry.user_ip,
       })
     },
+
+    async canExecute(
+      agentId: string,
+      month: string,
+      estimatedCostUsd: number,
+    ): Promise<{ allowed: boolean; reason?: string }> {
+      const agent = await db.select().from(agents).where(eq(agents.id, agentId)).limit(1)
+      const a = agent[0]
+      if (!a) return { allowed: false, reason: 'Agent not found' }
+      if (a.status !== 'active') return { allowed: false, reason: `Agent is ${a.status}` }
+
+      const limitUsd = Number(a.budget_monthly)
+      if (limitUsd === 0) return { allowed: true }
+
+      const budgetRows = await db
+        .select()
+        .from(budgets)
+        .where(and(eq(budgets.agent_id, agentId), eq(budgets.month, month)))
+        .limit(1)
+      const spentUsd = budgetRows[0] ? Number(budgetRows[0].spent_usd) : 0
+
+      if (spentUsd + estimatedCostUsd > limitUsd) {
+        return {
+          allowed: false,
+          reason: `Budget exceeded: ${spentUsd.toFixed(2)}/${limitUsd.toFixed(2)} USD`,
+        }
+      }
+      return { allowed: true }
+    },
   }
 }
