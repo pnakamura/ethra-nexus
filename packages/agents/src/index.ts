@@ -28,3 +28,11 @@ export { WikiFsAdapter, syncWikiToFilesystem } from './lib/fs'
 // Bootstrap (runtime composition)
 export { bootstrap } from './bootstrap'
 export type { NexusRuntime } from './bootstrap'
+
+// AIOS Master
+export { executeTask } from './lib/aios/aios-master'
+export type { AiosTaskRequest } from './lib/aios/aios-master'
+
+// Skill Executor
+export { executeSkill } from './lib/skills/skill-executor'
+export type { SkillInput, SkillOutput } from './lib/skills/skill-executor'
