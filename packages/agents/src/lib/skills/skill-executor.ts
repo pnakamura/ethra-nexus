@@ -61,23 +61,44 @@ async function executeWikiQuery(
   const db = getDb()
 
   // Busca semântica na wiki — non-fatal se falhar
+  // Combina System Wiki (wiki_strategic_pages) + Agent Wiki (wiki_agent_pages)
   let wikiContext = ''
   try {
     const embedding = await embed(question)
     const vectorStr = `[${embedding.join(',')}]`
-    const rows = await db.execute(
-      sql`SELECT title, content
-          FROM wiki_strategic_pages
-          WHERE tenant_id = ${context.tenant_id}
-            AND status = 'ativo'
-            AND embedding IS NOT NULL
-            AND 1 - (embedding <=> ${vectorStr}::vector) > 0.3
-          ORDER BY embedding <=> ${vectorStr}::vector
-          LIMIT 3`,
-    )
-    const pages = rows.rows as Array<{ title: string; content: string }>
-    if (pages.length > 0) {
-      wikiContext = pages.map((p) => `## ${p.title}\n${p.content}`).join('\n\n---\n\n')
+
+    const [systemRows, agentRows] = await Promise.all([
+      db.execute(
+        sql`SELECT title, content, 1 - (embedding <=> ${vectorStr}::vector) AS similarity
+            FROM wiki_strategic_pages
+            WHERE tenant_id = ${context.tenant_id}
+              AND status = 'ativo'
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> ${vectorStr}::vector
+            LIMIT 5`,
+      ),
+      db.execute(
+        sql`SELECT title, content, 1 - (embedding <=> ${vectorStr}::vector) AS similarity
+            FROM wiki_agent_pages
+            WHERE agent_id = ${context.agent_id}
+              AND status = 'ativo'
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> ${vectorStr}::vector
+            LIMIT 5`,
+      ),
+    ])
+
+    type WikiRow = { title: string; content: string; similarity: number }
+    const combined = [
+      ...(systemRows.rows as WikiRow[]),
+      ...(agentRows.rows as WikiRow[]),
+    ]
+      .filter((r) => r.similarity > 0.3)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 3)
+
+    if (combined.length > 0) {
+      wikiContext = combined.map((p) => `## ${p.title}\n${p.content}`).join('\n\n---\n\n')
     }
   } catch {
     // wiki search failure é non-fatal: responde sem contexto
