@@ -205,5 +205,24 @@ export function createAgentsDb() {
         })
         .where(eq(aiosEvents.id, eventId))
     },
+
+    async getBudgetAlertsFired(agentId: string, month: string): Promise<number[]> {
+      const rows = await db
+        .select({ payload: auditLog.payload })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.entity_type, 'budget'),
+            eq(auditLog.entity_id, agentId),
+            eq(auditLog.action, 'budget_alert'),
+          ),
+        )
+      return rows
+        .map((r) => {
+          const p = r.payload as Record<string, unknown>
+          return p['month'] === month ? Number(p['threshold']) : null
+        })
+        .filter((t): t is number => t !== null)
+    },
   }
 }

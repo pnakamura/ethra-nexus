@@ -155,12 +155,32 @@ export async function executeTask(
       cost_usd,
     })
 
-    // 7. Post-check: limiar de budget (log apenas — notificação em fase 7b)
+    // 7. Post-check: budget threshold alerts — log once per threshold per month
     const budgetRow = await agentsDb.getBudget(task.agent_id, month)
     const spentUsd = budgetRow != null ? Number(budgetRow.spent_usd) : 0
     const limitUsd = Number(agent.budget_monthly)
-    if (limitUsd > 0 && spentUsd / limitUsd >= 0.9) {
-      // TODO fase 7b: disparar AlertThreshold (notify_dashboard, notify_email)
+    if (limitUsd > 0) {
+      const pct = (spentUsd / limitUsd) * 100
+      const thresholds = [50, 75, 90]
+      const alreadyFired = await agentsDb.getBudgetAlertsFired(task.agent_id, month)
+      for (const threshold of thresholds) {
+        if (pct >= threshold && !alreadyFired.includes(threshold)) {
+          await agentsDb.insertAuditEntry({
+            tenant_id: task.tenant_id,
+            entity_type: 'budget',
+            entity_id: task.agent_id,
+            action: 'budget_alert',
+            actor: 'aios-master',
+            payload: {
+              month,
+              threshold,
+              spent_usd: spentUsd,
+              limit_usd: limitUsd,
+              percent: Math.round(pct),
+            },
+          })
+        }
+      }
     }
   } else {
     await agentsDb.updateAiosEvent(eventId, {
