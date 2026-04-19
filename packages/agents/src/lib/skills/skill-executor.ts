@@ -37,6 +37,10 @@ export async function executeSkill(
     return executeWikiQuery(skill_id, context, input, agent, ts)
   }
 
+  if (skill_id === 'wiki:lint') {
+    return executeWikiLint(skill_id, context, ts)
+  }
+
   return {
     ok: false,
     error: {
@@ -125,6 +129,85 @@ async function executeWikiQuery(
     ok: true,
     data: {
       answer: completion.content,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
+  }
+}
+
+async function executeWikiLint(
+  skill_id: SkillId,
+  context: AgentContext,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const db = getDb()
+
+  const [totalRows, noEmbeddingRows, staleRows, lowConfRows] = await Promise.all([
+    db.execute(
+      sql`SELECT COUNT(*) AS count FROM wiki_strategic_pages
+          WHERE tenant_id = ${context.tenant_id} AND status = 'ativo'`,
+    ),
+    db.execute(
+      sql`SELECT COUNT(*) AS count FROM wiki_strategic_pages
+          WHERE tenant_id = ${context.tenant_id} AND status = 'ativo' AND embedding IS NULL`,
+    ),
+    db.execute(
+      sql`SELECT COUNT(*) AS count FROM wiki_strategic_pages
+          WHERE tenant_id = ${context.tenant_id} AND status = 'ativo'
+            AND valid_until IS NOT NULL AND valid_until < NOW()`,
+    ),
+    db.execute(
+      sql`SELECT COUNT(*) AS count FROM wiki_strategic_pages
+          WHERE tenant_id = ${context.tenant_id} AND status = 'ativo'
+            AND confidence IN ('pendente', 'baixa')`,
+    ),
+  ])
+
+  const total = Number((totalRows.rows[0] as { count: string }).count)
+  const noEmbedding = Number((noEmbeddingRows.rows[0] as { count: string }).count)
+  const stale = Number((staleRows.rows[0] as { count: string }).count)
+  const lowConf = Number((lowConfRows.rows[0] as { count: string }).count)
+
+  const issues = noEmbedding + stale + lowConf
+  const score = total === 0 ? 100 : Math.max(0, Math.round(100 - (issues / total) * 100))
+
+  const metricsText = `Wiki Health Metrics (tenant):
+- Total de páginas ativas: ${total}
+- Páginas sem embedding (busca semântica inativa): ${noEmbedding}
+- Páginas vencidas (valid_until expirado): ${stale}
+- Páginas com baixa confiança (pendente/baixa): ${lowConf}
+- Score calculado: ${score}/100`
+
+  const registry = createRegistryFromEnv()
+  const completion = await registry.complete('wiki:lint', {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Você é um auditor de base de conhecimento. Analise as métricas fornecidas e gere um relatório de saúde conciso em português, com os principais problemas e ações recomendadas.',
+      },
+      { role: 'user', content: metricsText },
+    ],
+    max_tokens: 600,
+    sensitive_data: false,
+  })
+
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+
+  return {
+    ok: true,
+    data: {
+      answer: `${metricsText}\n\n---\n\n${completion.content}`,
       tokens_in: completion.input_tokens,
       tokens_out: completion.output_tokens,
       cost_usd: costUsd,
