@@ -138,7 +138,7 @@ export function validateFileSystemPath(
 
   // Verifica que o path resultante está dentro do diretório permitido
   const normalizedBase = allowedBase.replace(/\\/g, '/')
-  if (!normalized.startsWith(normalizedBase)) {
+  if (!normalized.startsWith(normalizedBase + '/') && normalized !== normalizedBase) {
     throw new SecurityValidationError(
       `Path "${inputPath}" escapes allowed directory "${allowedBase}"`,
     )

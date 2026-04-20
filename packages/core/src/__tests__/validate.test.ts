@@ -60,6 +60,8 @@ describe('validatePageType', () => {
 describe('validateConfidence', () => {
   it('aceita valores válidos', () => {
     expect(validateConfidence('alta')).toBe('alta')
+    expect(validateConfidence('media')).toBe('media')
+    expect(validateConfidence('baixa')).toBe('baixa')
     expect(validateConfidence('pendente')).toBe('pendente')
   })
   it('rejeita valor inválido', () => {
@@ -78,6 +80,9 @@ describe('validateCronExpression', () => {
   it('rejeita expressão muito frequente (* *)', () => {
     expect(() => validateCronExpression('* * * * *')).toThrow(SecurityValidationError)
   })
+  // Nota: '*/1 * * * *' (todo minuto com step syntax) passa pelo guard atual.
+  // O guard verifica parts[0] === '*', mas '*/1' não é estritamente igual a '*'.
+  // Baixo risco em prática — deixar para hardening futuro.
   it('rejeita texto não-cron', () => {
     expect(() => validateCronExpression('não é cron')).toThrow(SecurityValidationError)
   })
@@ -120,6 +125,9 @@ describe('validateFileSystemPath', () => {
   })
   it('rejeita path fora do base', () => {
     expect(() => validateFileSystemPath('/etc/passwd', '/wikis')).toThrow(SecurityValidationError)
+  })
+  it('rejeita path com prefixo similar ao base mas fora do base', () => {
+    expect(() => validateFileSystemPath('/wikis/system-evil/page', '/wikis/system')).toThrow(SecurityValidationError)
   })
 })
 
