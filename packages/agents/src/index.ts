@@ -36,3 +36,11 @@ export type { AiosTaskRequest } from './lib/aios/aios-master'
 // Skill Executor
 export { executeSkill } from './lib/skills/skill-executor'
 export type { SkillInput, SkillOutput } from './lib/skills/skill-executor'
+
+// Scheduler
+export { startSchedulerLoop } from './lib/scheduler/scheduler-loop'
+export { emitEvent } from './lib/scheduler/event-bus'
+export type { BusEventType, QueuedEvent } from './lib/scheduler/event-bus'
+export { validateCron, calcNextRun } from './lib/scheduler/cron-utils'
+export { dispatchOutput } from './lib/scheduler/output-dispatcher'
+export type { DispatchSource } from './lib/scheduler/output-dispatcher'

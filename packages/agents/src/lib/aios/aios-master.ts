@@ -3,6 +3,7 @@ import { eq, and } from 'drizzle-orm'
 import { getDb, agents } from '@ethra-nexus/db'
 import { createAgentsDb } from '../db/db-agents'
 import { executeSkill, type SkillInput, type SkillOutput } from '../skills/skill-executor'
+import { emitEvent } from '../scheduler/event-bus'
 
 export interface AiosTaskRequest {
   tenant_id: string
@@ -155,7 +156,7 @@ export async function executeTask(
       cost_usd,
     })
 
-    // 7. Post-check: budget threshold alerts — log once per threshold per month
+    // 7. Post-check: budget threshold alerts — log once per threshold per month + emit event
     const budgetRow = await agentsDb.getBudget(task.agent_id, month)
     const spentUsd = budgetRow != null ? Number(budgetRow.spent_usd) : 0
     const limitUsd = Number(agent.budget_monthly)
@@ -165,20 +166,22 @@ export async function executeTask(
       const alreadyFired = await agentsDb.getBudgetAlertsFired(task.agent_id, month)
       for (const threshold of thresholds) {
         if (pct >= threshold && !alreadyFired.includes(threshold)) {
+          const alertPayload = {
+            month,
+            threshold,
+            spent_usd: spentUsd,
+            limit_usd: limitUsd,
+            percent: Math.round(pct),
+          }
           await agentsDb.insertAuditEntry({
             tenant_id: task.tenant_id,
             entity_type: 'budget',
             entity_id: task.agent_id,
             action: 'budget_alert',
             actor: 'aios-master',
-            payload: {
-              month,
-              threshold,
-              spent_usd: spentUsd,
-              limit_usd: limitUsd,
-              percent: Math.round(pct),
-            },
+            payload: alertPayload,
           })
+          await emitEvent('budget_alert', alertPayload, task.tenant_id, task.agent_id)
         }
       }
     }
