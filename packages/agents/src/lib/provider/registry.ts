@@ -57,7 +57,7 @@ export class ProviderRegistry implements IProviderRegistry {
         output_tokens: 20,
         estimated_cost_usd: 0,
         latency_ms: 0,
-        provider: 'mock' as ProviderName,
+        provider: 'mock',
         model: 'mock',
         is_fallback: false,
       }

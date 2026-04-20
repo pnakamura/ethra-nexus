@@ -15,7 +15,7 @@
 //          OpenRouter como gateway para providers secundários
 // ============================================================
 
-export type ProviderName = 'anthropic' | 'openrouter'
+export type ProviderName = 'anthropic' | 'openrouter' | 'mock'
 
 export interface ProviderTarget {
   provider: ProviderName
