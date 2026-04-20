@@ -11,6 +11,10 @@ import { ticketRoutes } from './routes/tickets'
 import { wikiRoutes } from './routes/wiki'
 import { wikiAgentWritesRoutes } from './routes/wiki-agent-writes'
 import { aiosRoutes } from './routes/aios'
+import { schedulesRoutes } from './routes/schedules'
+import { eventSubscriptionsRoutes } from './routes/event-subscriptions'
+import { webhookRoutes } from './routes/webhooks'
+import { startSchedulerLoop } from '@ethra-nexus/agents'
 
 // ============================================================
 // Ethra Nexus — Fastify Application
@@ -53,7 +57,7 @@ export async function buildApp() {
   // ── Global hook: JWT + tenant isolation ──────────────────
   app.addHook('onRequest', async (request, reply) => {
     // Skip auth for public routes
-    const publicPaths = ['/api/v1/health', '/api/v1/auth/login']
+    const publicPaths = ['/api/v1/health', '/api/v1/auth/login', '/api/v1/webhooks']
     if (publicPaths.some((p) => request.url.startsWith(p))) {
       return
     }
@@ -74,6 +78,11 @@ export async function buildApp() {
   await app.register(wikiRoutes, { prefix: '/api/v1' })
   await app.register(wikiAgentWritesRoutes, { prefix: '/api/v1' })
   await app.register(aiosRoutes, { prefix: '/api/v1' })
+  await app.register(schedulesRoutes, { prefix: '/api/v1' })
+  await app.register(eventSubscriptionsRoutes, { prefix: '/api/v1' })
+  await app.register(webhookRoutes, { prefix: '/api/v1' })
+
+  startSchedulerLoop()
 
   return app
 }
