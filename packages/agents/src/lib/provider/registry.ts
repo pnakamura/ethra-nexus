@@ -50,6 +50,19 @@ export class ProviderRegistry implements IProviderRegistry {
     params: CompletionParams,
     options: CompleteOptions = {},
   ): Promise<CompletionResult> {
+    if (process.env['NEXUS_MOCK_LLM'] === 'true') {
+      return {
+        content: 'Mock LLM response for testing',
+        input_tokens: 10,
+        output_tokens: 20,
+        estimated_cost_usd: 0,
+        latency_ms: 0,
+        provider: 'mock' as ProviderName,
+        model: 'mock',
+        is_fallback: false,
+      }
+    }
+
     const moduleConfig: ModuleProviderConfig | undefined = MODULE_PROVIDER_MAP[moduleId]
     if (!moduleConfig) {
       throw new Error(`No provider config for module '${moduleId}'`)
