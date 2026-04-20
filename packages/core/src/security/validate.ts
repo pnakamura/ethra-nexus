@@ -78,7 +78,8 @@ export function validateConfidence(confidence: string): WikiConfidence {
 // ── Cron Expression ──────────────────────────────────────────
 
 // Aceita: 5 campos (min hora dia mês diaDaSemana)
-const CRON_PATTERN = /^(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)\s+(\*|[0-9,\-\/]+)$/
+// Cada campo: * | */N | número | range | lista | combinações com step (ex: 1-5/2)
+const CRON_PATTERN = /^(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)\s+(\*(?:\/[0-9]+)?|[0-9,\-\/]+)$/
 
 export function validateCronExpression(cron: string): string {
   if (!CRON_PATTERN.test(cron.trim())) {
