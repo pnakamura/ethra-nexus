@@ -1,5 +1,5 @@
-import { eq, and, sql } from 'drizzle-orm'
-import { getDb, agents, budgets, providerUsageLog, auditLog, aiosEvents } from '@ethra-nexus/db'
+import { eq, and, sql, inArray } from 'drizzle-orm'
+import { getDb, agents, agentSkills, agentChannels, budgets, providerUsageLog, auditLog, aiosEvents } from '@ethra-nexus/db'
 
 // ============================================================
 // DB Agents — queries Drizzle para o orquestrador
@@ -225,6 +225,37 @@ export function createAgentsDb() {
           return p['month'] === month ? Number(p['threshold']) : null
         })
         .filter((t): t is number => t !== null)
+    },
+
+    async loadAgentWithDetails(agentId: string, tenantId: string) {
+      const [[agent], skills, channels] = await Promise.all([
+        db.select().from(agents)
+          .where(and(eq(agents.id, agentId), eq(agents.tenant_id, tenantId)))
+          .limit(1),
+        db.select().from(agentSkills).where(eq(agentSkills.agent_id, agentId)),
+        db.select().from(agentChannels).where(eq(agentChannels.agent_id, agentId)),
+      ])
+      if (!agent) return null
+      return { ...agent, skills, channels }
+    },
+
+    async loadAgentsWithDetails(tenantId: string) {
+      const agentList = await db.select().from(agents)
+        .where(and(eq(agents.tenant_id, tenantId), sql`${agents.status} != 'archived'`))
+
+      if (agentList.length === 0) return []
+
+      const agentIds = agentList.map((a) => a.id)
+      const [skillsList, channelsList] = await Promise.all([
+        db.select().from(agentSkills).where(inArray(agentSkills.agent_id, agentIds)),
+        db.select().from(agentChannels).where(inArray(agentChannels.agent_id, agentIds)),
+      ])
+
+      return agentList.map((agent) => ({
+        ...agent,
+        skills: skillsList.filter((s) => s.agent_id === agent.id),
+        channels: channelsList.filter((c) => c.agent_id === agent.id),
+      }))
     },
   }
 }
