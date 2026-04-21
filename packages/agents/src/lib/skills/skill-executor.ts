@@ -5,6 +5,7 @@ import { createRegistryFromEnv } from '../provider'
 import { createWikiDb } from '../db'
 import { getDb } from '@ethra-nexus/db'
 import { sql } from 'drizzle-orm'
+import { emitEvent } from '../scheduler/event-bus'
 
 export interface SkillInput {
   question?: string
@@ -329,6 +330,19 @@ async function executeWikiIngest(
     parts.push(`Páginas inválidas descartadas: ${extraction.invalid_reasons.length}.`)
   }
   const answer = parts.join(' ')
+
+  // Sinalizar chains multi-agente (ex: wiki:lint automático pós-ingestão)
+  try {
+    await emitEvent('wiki_ingested', {
+      source_name: sourceName,
+      pages_extracted: extraction.pages.length,
+      pages_persisted: persisted,
+      tenant_id: context.tenant_id,
+      __call_depth: 0,
+    }, context.tenant_id)
+  } catch {
+    // emission failure não aborta a ingestão
+  }
 
   return {
     ok: true,

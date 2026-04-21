@@ -37,6 +37,12 @@ vi.mock('drizzle-orm', () => ({
   sql: vi.fn().mockReturnValue(''),
 }))
 
+const mockEmitEvent = vi.fn().mockResolvedValue(undefined)
+
+vi.mock('../lib/scheduler/event-bus', () => ({
+  emitEvent: mockEmitEvent,
+}))
+
 const { executeSkill } = await import('../lib/skills/skill-executor')
 
 const context: AgentContext = {
@@ -144,6 +150,16 @@ describe('executeSkill — dispatcher', () => {
         author_type: 'agent',
       }),
     )
+    expect(mockEmitEvent).toHaveBeenCalledWith(
+      'wiki_ingested',
+      expect.objectContaining({
+        source_name: 'doc.pdf',
+        pages_extracted: 2,
+        pages_persisted: 2,
+        tenant_id: 'tenant-1',
+      }),
+      'tenant-1',
+    )
   })
 
   it('wiki:ingest → retorna INVALID_INPUT quando content está ausente', async () => {
@@ -154,6 +170,7 @@ describe('executeSkill — dispatcher', () => {
       expect(result.error.code).toBe('INVALID_INPUT')
     }
     expect(mockUpsertStrategicPage).not.toHaveBeenCalled()
+    expect(mockEmitEvent).not.toHaveBeenCalled()
   })
 
   // ── channel:proactive ─────────────────────────────────────────────────

@@ -73,6 +73,8 @@ async function processEventQueue(): Promise<void> {
 
   await Promise.allSettled(
     pending.map(async ({ subscription, payload }) => {
+      const callDepth =
+        typeof payload['__call_depth'] === 'number' ? payload['__call_depth'] : 0
       const result = await executeTask({
         tenant_id: subscription.tenant_id,
         agent_id: subscription.agent_id,
@@ -81,6 +83,7 @@ async function processEventQueue(): Promise<void> {
         activation_mode: 'event',
         activation_source: 'event-bus',
         triggered_by: 'event-bus',
+        call_depth: callDepth,
       })
       await dispatchOutput(result, {
         tenant_id: subscription.tenant_id,
