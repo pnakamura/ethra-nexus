@@ -10,6 +10,7 @@ describe('validateCron', () => {
     expect(validateCron('30 18 * * 0')).toBe(true)
   })
   it('rejeita texto inválido', () => {
+    expect(validateCron('')).toBe(false) // string vazia
     expect(validateCron('não é cron')).toBe(false)
     expect(validateCron('a b c d e')).toBe(false) // caracteres inválidos
     expect(validateCron('* * * * * * *')).toBe(false) // 7 campos

@@ -1,6 +1,7 @@
 import { parseExpression } from 'cron-parser'
 
 export function validateCron(expression: string): boolean {
+  if (!expression.trim()) return false
   try {
     parseExpression(expression)
     return true
