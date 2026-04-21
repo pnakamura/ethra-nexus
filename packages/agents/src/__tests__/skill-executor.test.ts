@@ -156,6 +156,197 @@ describe('executeSkill — dispatcher', () => {
     expect(mockUpsertStrategicPage).not.toHaveBeenCalled()
   })
 
+  // ── channel:proactive ─────────────────────────────────────────────────
+  it('channel:proactive → chama LLM e retorna ok:true', async () => {
+    const result = await executeSkill(
+      'channel:proactive',
+      context,
+      { message: 'Lembrete: reunião às 15h.' },
+      agent,
+    )
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toBe('Resposta do LLM mockado')
+      expect(result.data.tokens_in).toBe(100)
+      expect(result.data.tokens_out).toBe(50)
+    }
+    expect(mockComplete).toHaveBeenCalledWith(
+      'channel:proactive',
+      expect.objectContaining({ sensitive_data: true }),
+    )
+  })
+
+  it('channel:proactive → retorna INVALID_INPUT quando message está ausente', async () => {
+    const result = await executeSkill('channel:proactive', context, {}, agent)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+    expect(mockComplete).not.toHaveBeenCalled()
+  })
+
+  // ── report:generate ───────────────────────────────────────────────────
+  it('report:generate → chama LLM e retorna ok:true', async () => {
+    const result = await executeSkill(
+      'report:generate',
+      context,
+      { report_type: 'mensal', data: 'Vendas: R$10.000' },
+      agent,
+    )
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toBe('Resposta do LLM mockado')
+      expect(result.data.tokens_in).toBe(100)
+      expect(result.data.tokens_out).toBe(50)
+    }
+    expect(mockComplete).toHaveBeenCalledWith(
+      'report:generate',
+      expect.objectContaining({ sensitive_data: true }),
+    )
+  })
+
+  it('report:generate → retorna INVALID_INPUT quando data está ausente', async () => {
+    const result = await executeSkill(
+      'report:generate',
+      context,
+      { report_type: 'mensal' },
+      agent,
+    )
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+    expect(mockComplete).not.toHaveBeenCalled()
+  })
+
+  // ── monitor:health ────────────────────────────────────────────────────
+  it('monitor:health → chama LLM e retorna ok:true', async () => {
+    const result = await executeSkill(
+      'monitor:health',
+      context,
+      { check_config: 'CPU: 45%, RAM: 60%, Disk: 70%' },
+      agent,
+    )
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toBe('Resposta do LLM mockado')
+      expect(result.data.tokens_in).toBe(100)
+      expect(result.data.tokens_out).toBe(50)
+    }
+    expect(mockComplete).toHaveBeenCalledWith(
+      'monitor:health',
+      expect.objectContaining({ sensitive_data: false }),
+    )
+  })
+
+  it('monitor:health → retorna INVALID_INPUT quando check_config está ausente', async () => {
+    const result = await executeSkill('monitor:health', context, {}, agent)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+    expect(mockComplete).not.toHaveBeenCalled()
+  })
+
+  // ── monitor:alert ─────────────────────────────────────────────────────
+  it('monitor:alert → chama LLM e retorna ok:true', async () => {
+    const result = await executeSkill(
+      'monitor:alert',
+      context,
+      { condition: 'CPU > 90%', threshold: '90', current_value: '95' },
+      agent,
+    )
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toBe('Resposta do LLM mockado')
+      expect(result.data.tokens_in).toBe(100)
+      expect(result.data.tokens_out).toBe(50)
+    }
+    expect(mockComplete).toHaveBeenCalledWith(
+      'monitor:alert',
+      expect.objectContaining({ sensitive_data: false }),
+    )
+  })
+
+  it('monitor:alert → retorna INVALID_INPUT quando condition está ausente', async () => {
+    const result = await executeSkill('monitor:alert', context, {}, agent)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+    expect(mockComplete).not.toHaveBeenCalled()
+  })
+
+  // ── data:analyze ──────────────────────────────────────────────────────
+  it('data:analyze → chama LLM e retorna ok:true', async () => {
+    const result = await executeSkill(
+      'data:analyze',
+      context,
+      { data: 'Jan: 100, Fev: 120, Mar: 90', analysis_type: 'tendência' },
+      agent,
+    )
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toBe('Resposta do LLM mockado')
+      expect(result.data.tokens_in).toBe(100)
+      expect(result.data.tokens_out).toBe(50)
+    }
+    expect(mockComplete).toHaveBeenCalledWith(
+      'data:analyze',
+      expect.objectContaining({ sensitive_data: false }),
+    )
+  })
+
+  it('data:analyze → retorna INVALID_INPUT quando data está ausente', async () => {
+    const result = await executeSkill('data:analyze', context, {}, agent)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+    expect(mockComplete).not.toHaveBeenCalled()
+  })
+
+  // ── data:extract ──────────────────────────────────────────────────────
+  it('data:extract → chama LLM e retorna ok:true', async () => {
+    const result = await executeSkill(
+      'data:extract',
+      context,
+      { content: 'Nome: João, CPF: 123.456.789-00', extract_schema: 'nome, cpf' },
+      agent,
+    )
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toBe('Resposta do LLM mockado')
+      expect(result.data.tokens_in).toBe(100)
+      expect(result.data.tokens_out).toBe(50)
+    }
+    expect(mockComplete).toHaveBeenCalledWith(
+      'data:extract',
+      expect.objectContaining({ sensitive_data: true }),
+    )
+  })
+
+  it('data:extract → retorna INVALID_INPUT quando content está ausente', async () => {
+    const result = await executeSkill('data:extract', context, {}, agent)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+    expect(mockComplete).not.toHaveBeenCalled()
+  })
+
   it('skill desconhecida → retorna ok:false com SKILL_NOT_FOUND', async () => {
     // @ts-expect-error testando skill inválida intencionalmente
     const result = await executeSkill('nonexistent:skill', context, {}, agent)

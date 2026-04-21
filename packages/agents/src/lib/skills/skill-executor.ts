@@ -47,6 +47,30 @@ export async function executeSkill(
     return executeWikiIngest(skill_id, context, input, ts)
   }
 
+  if (skill_id === 'channel:proactive') {
+    return executeChannelProactive(skill_id, context, input, ts)
+  }
+
+  if (skill_id === 'report:generate') {
+    return executeReportGenerate(skill_id, context, input, ts)
+  }
+
+  if (skill_id === 'monitor:health') {
+    return executeMonitorHealth(skill_id, context, input, ts)
+  }
+
+  if (skill_id === 'monitor:alert') {
+    return executeMonitorAlert(skill_id, context, input, ts)
+  }
+
+  if (skill_id === 'data:analyze') {
+    return executeDataAnalyze(skill_id, context, input, ts)
+  }
+
+  if (skill_id === 'data:extract') {
+    return executeDataExtract(skill_id, context, input, ts)
+  }
+
   return {
     ok: false,
     error: {
@@ -322,5 +346,373 @@ async function executeWikiIngest(
     timestamp: ts,
     tokens_used: 0,
     cost_usd: 0,
+  }
+}
+
+async function executeChannelProactive(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const message = typeof input['message'] === 'string' ? input['message'] : ''
+
+  if (!message) {
+    return {
+      ok: false,
+      error: {
+        code: 'INVALID_INPUT',
+        message: "Parâmetro 'message' é obrigatório para channel:proactive",
+        retryable: false,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const registry = createRegistryFromEnv()
+  const completion = await registry.complete('channel:proactive', {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Você é um assistente que redige notificações e alertas proativos claros e objetivos em português.',
+      },
+      { role: 'user', content: message },
+    ],
+    max_tokens: 500,
+    sensitive_data: true,
+  })
+
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+
+  return {
+    ok: true,
+    data: {
+      answer: completion.content,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
+  }
+}
+
+async function executeReportGenerate(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const reportType = typeof input['report_type'] === 'string' ? input['report_type'] : ''
+  const data = typeof input['data'] === 'string' ? input['data'] : ''
+
+  if (!reportType || !data) {
+    return {
+      ok: false,
+      error: {
+        code: 'INVALID_INPUT',
+        message: "Parâmetros 'report_type' e 'data' são obrigatórios para report:generate",
+        retryable: false,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const registry = createRegistryFromEnv()
+  const completion = await registry.complete('report:generate', {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Você é um especialista em geração de relatórios. Gere um relatório estruturado e profissional em português com base nos dados fornecidos.',
+      },
+      { role: 'user', content: `Tipo de relatório: ${reportType}\n\nDados:\n${data}` },
+    ],
+    max_tokens: 2000,
+    sensitive_data: true,
+  })
+
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+
+  return {
+    ok: true,
+    data: {
+      answer: completion.content,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
+  }
+}
+
+async function executeMonitorHealth(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const checkConfig = typeof input['check_config'] === 'string' ? input['check_config'] : ''
+
+  if (!checkConfig) {
+    return {
+      ok: false,
+      error: {
+        code: 'INVALID_INPUT',
+        message: "Parâmetro 'check_config' é obrigatório para monitor:health",
+        retryable: false,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const registry = createRegistryFromEnv()
+  const completion = await registry.complete('monitor:health', {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Você é um monitor de sistemas. Avalie as informações de saúde fornecidas e retorne um diagnóstico claro: SAUDÁVEL, DEGRADADO ou CRÍTICO, com justificativa.',
+      },
+      { role: 'user', content: checkConfig },
+    ],
+    max_tokens: 400,
+    sensitive_data: false,
+  })
+
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+
+  return {
+    ok: true,
+    data: {
+      answer: completion.content,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
+  }
+}
+
+async function executeMonitorAlert(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const condition = typeof input['condition'] === 'string' ? input['condition'] : ''
+
+  if (!condition) {
+    return {
+      ok: false,
+      error: {
+        code: 'INVALID_INPUT',
+        message: "Parâmetro 'condition' é obrigatório para monitor:alert",
+        retryable: false,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const threshold = typeof input['threshold'] === 'string' ? input['threshold'] : ''
+  const currentValue = typeof input['current_value'] === 'string' ? input['current_value'] : ''
+
+  const userContent = [
+    `Condição: ${condition}`,
+    threshold ? `Limite: ${threshold}` : '',
+    currentValue ? `Valor atual: ${currentValue}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const registry = createRegistryFromEnv()
+  const completion = await registry.complete('monitor:alert', {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Você é um avaliador de alertas de sistema. Avalie a condição fornecida e determine se deve disparar um alerta: DISPARAR ou NÃO_DISPARAR, com justificativa.',
+      },
+      { role: 'user', content: userContent },
+    ],
+    max_tokens: 300,
+    sensitive_data: false,
+  })
+
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+
+  return {
+    ok: true,
+    data: {
+      answer: completion.content,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
+  }
+}
+
+async function executeDataAnalyze(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const data = typeof input['data'] === 'string' ? input['data'] : ''
+
+  if (!data) {
+    return {
+      ok: false,
+      error: {
+        code: 'INVALID_INPUT',
+        message: "Parâmetro 'data' é obrigatório para data:analyze",
+        retryable: false,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const analysisType = typeof input['analysis_type'] === 'string' ? input['analysis_type'] : ''
+  const userContent = analysisType ? `Tipo de análise: ${analysisType}\n\nDados:\n${data}` : data
+
+  const registry = createRegistryFromEnv()
+  const completion = await registry.complete('data:analyze', {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Você é um analista de dados. Analise os dados fornecidos e gere insights relevantes e acionáveis em português.',
+      },
+      { role: 'user', content: userContent },
+    ],
+    max_tokens: 1500,
+    sensitive_data: false,
+  })
+
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+
+  return {
+    ok: true,
+    data: {
+      answer: completion.content,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
+  }
+}
+
+async function executeDataExtract(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const content = typeof input['content'] === 'string' ? input['content'] : ''
+
+  if (!content) {
+    return {
+      ok: false,
+      error: {
+        code: 'INVALID_INPUT',
+        message: "Parâmetro 'content' é obrigatório para data:extract",
+        retryable: false,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const extractSchema = typeof input['extract_schema'] === 'string' ? input['extract_schema'] : ''
+  const userContent = extractSchema
+    ? `Schema de extração:\n${extractSchema}\n\nDocumento:\n${content}`
+    : content
+
+  const registry = createRegistryFromEnv()
+  const completion = await registry.complete('data:extract', {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Você é um extrator de dados estruturados. Extraia as informações relevantes do documento fornecido e retorne em formato estruturado (JSON quando possível).',
+      },
+      { role: 'user', content: userContent },
+    ],
+    max_tokens: 1500,
+    sensitive_data: true,
+  })
+
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+
+  return {
+    ok: true,
+    data: {
+      answer: completion.content,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
   }
 }
