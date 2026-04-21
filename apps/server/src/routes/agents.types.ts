@@ -85,7 +85,7 @@ export function validateChannelConfig(
         return 'email channel requires config.address (string)'
       }
       if (!(config['address'] as string).includes('@')) {
-        return 'email config.address must be a valid email'
+        return 'email config.address must contain @ and be a valid email'
       }
       break
     case 'slack':
