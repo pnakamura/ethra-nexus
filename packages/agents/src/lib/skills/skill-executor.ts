@@ -1,6 +1,7 @@
 import type { SkillId, AgentResult, AgentContext } from '@ethra-nexus/core'
-import { embed } from '@ethra-nexus/wiki'
+import { embed, extractPagesFromContent } from '@ethra-nexus/wiki'
 import { createRegistryFromEnv } from '../provider'
+import { createWikiDb } from '../db'
 import { getDb } from '@ethra-nexus/db'
 import { sql } from 'drizzle-orm'
 
@@ -39,6 +40,10 @@ export async function executeSkill(
 
   if (skill_id === 'wiki:lint') {
     return executeWikiLint(skill_id, context, ts)
+  }
+
+  if (skill_id === 'wiki:ingest') {
+    return executeWikiIngest(skill_id, context, input, ts)
   }
 
   return {
@@ -220,5 +225,95 @@ async function executeWikiLint(
     timestamp: ts,
     tokens_used: totalTokens,
     cost_usd: costUsd,
+  }
+}
+
+async function executeWikiIngest(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const content = typeof input['content'] === 'string' ? input['content'] : ''
+  const sourceName = typeof input['source_name'] === 'string' ? input['source_name'] : 'unknown'
+
+  if (!content) {
+    return {
+      ok: false,
+      error: {
+        code: 'INVALID_INPUT',
+        message: "Parâmetro 'content' é obrigatório para wiki:ingest",
+        retryable: false,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const registry = createRegistryFromEnv()
+  const extraction = await extractPagesFromContent(content, sourceName, registry)
+
+  const wikiDb = createWikiDb()
+  let persisted = 0
+  const failedSlugs: string[] = []
+
+  for (const page of extraction.pages) {
+    try {
+      const row = await wikiDb.upsertStrategicPage({
+        tenant_id: context.tenant_id,
+        slug: page.slug,
+        title: page.title,
+        type: page.type,
+        content: page.content,
+        sources: page.sources,
+        tags: page.tags,
+        confidence: page.confidence,
+        author_type: 'agent',
+      })
+
+      // Gerar embedding — non-fatal
+      try {
+        const vector = await embed(`${page.title}\n${page.content}`)
+        const vectorStr = `[${vector.join(',')}]`
+        await getDb().execute(
+          sql`UPDATE wiki_strategic_pages SET embedding = ${vectorStr}::vector WHERE id = ${row.id}`,
+        )
+      } catch {
+        // embedding failure não aborta a persistência
+      }
+
+      persisted++
+    } catch {
+      failedSlugs.push(page.slug)
+    }
+  }
+
+  const parts = [
+    `Ingestão concluída: ${extraction.pages.length} páginas extraídas, ${persisted} persistidas.`,
+    `Fonte: ${sourceName}.`,
+  ]
+  if (failedSlugs.length > 0) parts.push(`Falhas: ${failedSlugs.join(', ')}.`)
+  if (extraction.invalid_reasons.length > 0) {
+    parts.push(`Páginas inválidas descartadas: ${extraction.invalid_reasons.length}.`)
+  }
+  const answer = parts.join(' ')
+
+  return {
+    ok: true,
+    data: {
+      answer,
+      tokens_in: 0,
+      tokens_out: 0,
+      cost_usd: 0,
+      provider: 'anthropic',
+      model: 'wiki:ingest',
+      is_fallback: false,
+    },
+    agent_id: context.agent_id,
+    skill_id,
+    timestamp: ts,
+    tokens_used: 0,
+    cost_usd: 0,
   }
 }

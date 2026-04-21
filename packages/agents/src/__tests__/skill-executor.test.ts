@@ -1,8 +1,11 @@
 // packages/agents/src/__tests__/skill-executor.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { AgentContext } from '@ethra-nexus/core'
+import type { ExtractResult } from '@ethra-nexus/wiki'
+import { extractPagesFromContent } from '@ethra-nexus/wiki'  // mocked below — hoisting garante que é o mock
 
 const mockComplete = vi.fn()
+const mockUpsertStrategicPage = vi.fn()
 
 vi.mock('../lib/provider', () => ({
   createRegistryFromEnv: () => ({ complete: mockComplete }),
@@ -10,11 +13,17 @@ vi.mock('../lib/provider', () => ({
 
 vi.mock('@ethra-nexus/wiki', () => ({
   embed: vi.fn().mockResolvedValue(Array(1536).fill(0.1)),
+  extractPagesFromContent: vi.fn(),
+}))
+
+vi.mock('../lib/db', () => ({
+  createWikiDb: vi.fn(() => ({
+    upsertStrategicPage: mockUpsertStrategicPage,
+  })),
 }))
 
 vi.mock('@ethra-nexus/db', () => ({
   getDb: () => ({
-    // wiki:lint and wiki:query both use db.execute() only
     execute: vi.fn().mockResolvedValue({ rows: [{ count: '0' }] }),
   }),
 }))
@@ -80,6 +89,67 @@ describe('executeSkill — dispatcher', () => {
       expect(result.data.answer).toContain('Wiki Health Metrics')
       expect(typeof result.data.answer).toBe('string')
     }
+  })
+
+  it('wiki:ingest → extrai páginas e retorna ok:true com contagem', async () => {
+    const mockResult: ExtractResult = {
+      pages: [
+        {
+          slug: 'conceito-teste',
+          title: 'Conceito Teste',
+          type: 'conceito',
+          content: 'Conteúdo do conceito teste.',
+          confidence: 'alta',
+          sources: ['doc.pdf'],
+          tags: ['teste'],
+        },
+        {
+          slug: 'entidade-teste',
+          title: 'Entidade Teste',
+          type: 'entidade',
+          content: 'Descrição da entidade.',
+          confidence: 'media',
+          sources: ['doc.pdf'],
+          tags: [],
+        },
+      ],
+      invalid_reasons: [],
+      log_entry: 'Extraídas 2 páginas de doc.pdf',
+    }
+    vi.mocked(extractPagesFromContent).mockResolvedValue(mockResult)
+    mockUpsertStrategicPage.mockResolvedValue({ id: 'page-uuid-1' })
+
+    const result = await executeSkill(
+      'wiki:ingest',
+      context,
+      { content: 'Texto do documento a ser ingerido.', source_name: 'doc.pdf' },
+      agent,
+    )
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toContain('2 páginas extraídas')
+      expect(result.data.answer).toContain('2 persistidas')
+      expect(result.data.answer).toContain('doc.pdf')
+    }
+    expect(mockUpsertStrategicPage).toHaveBeenCalledTimes(2)
+    expect(mockUpsertStrategicPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenant_id: 'tenant-1',
+        slug: 'conceito-teste',
+        author_type: 'agent',
+      }),
+    )
+  })
+
+  it('wiki:ingest → retorna INVALID_INPUT quando content está ausente', async () => {
+    const result = await executeSkill('wiki:ingest', context, { source_name: 'doc.pdf' }, agent)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+    expect(mockUpsertStrategicPage).not.toHaveBeenCalled()
   })
 
   it('skill desconhecida → retorna ok:false com SKILL_NOT_FOUND', async () => {
