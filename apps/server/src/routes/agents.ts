@@ -209,20 +209,33 @@ export async function agentRoutes(app: FastifyInstance) {
     }
 
     const result = await db.transaction(async (tx) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const agentUpdate: Record<string, any> = { updated_at: new Date() }
-      if (body.name !== undefined) agentUpdate['name'] = body.name
-      if (body.model !== undefined) agentUpdate['model'] = body.model
-      if (body.system_prompt !== undefined) agentUpdate['system_prompt'] = body.system_prompt
-      if (body.system_prompt_extra !== undefined) agentUpdate['system_prompt_extra'] = body.system_prompt_extra
-      if (body.response_language !== undefined) agentUpdate['response_language'] = body.response_language
-      if (body.tone !== undefined) agentUpdate['tone'] = body.tone
-      if (body.restrictions !== undefined) agentUpdate['restrictions'] = body.restrictions
-      if (body.description !== undefined) agentUpdate['description'] = body.description
-      if (body.avatar_url !== undefined) agentUpdate['avatar_url'] = body.avatar_url
-      if (body.tags !== undefined) agentUpdate['tags'] = body.tags
-      if (body.budget_monthly !== undefined) agentUpdate['budget_monthly'] = body.budget_monthly
-      if (body.status !== undefined) agentUpdate['status'] = body.status
+      const agentUpdate: Partial<{
+        name: string
+        model: string
+        system_prompt: string
+        system_prompt_extra: string | null
+        response_language: string
+        tone: string
+        restrictions: string[]
+        description: string | null
+        avatar_url: string | null
+        tags: string[]
+        budget_monthly: string
+        status: string
+        updated_at: Date
+      }> = { updated_at: new Date() }
+      if (body.name !== undefined) agentUpdate.name = body.name
+      if (body.model !== undefined) agentUpdate.model = body.model
+      if (body.system_prompt !== undefined) agentUpdate.system_prompt = body.system_prompt
+      if (body.system_prompt_extra !== undefined) agentUpdate.system_prompt_extra = body.system_prompt_extra
+      if (body.response_language !== undefined) agentUpdate.response_language = body.response_language
+      if (body.tone !== undefined) agentUpdate.tone = body.tone
+      if (body.restrictions !== undefined) agentUpdate.restrictions = body.restrictions
+      if (body.description !== undefined) agentUpdate.description = body.description
+      if (body.avatar_url !== undefined) agentUpdate.avatar_url = body.avatar_url
+      if (body.tags !== undefined) agentUpdate.tags = body.tags
+      if (body.budget_monthly !== undefined) agentUpdate.budget_monthly = body.budget_monthly
+      if (body.status !== undefined) agentUpdate.status = body.status
 
       await tx.update(agents)
         .set(agentUpdate)
@@ -265,7 +278,9 @@ export async function agentRoutes(app: FastifyInstance) {
       }
 
       const [[updatedAgent], updatedSkills, updatedChannels] = await Promise.all([
-        tx.select().from(agents).where(eq(agents.id, agentId)).limit(1),
+        tx.select().from(agents)
+          .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
+          .limit(1),
         tx.select().from(agentSkills).where(eq(agentSkills.agent_id, agentId)),
         tx.select().from(agentChannels).where(eq(agentChannels.agent_id, agentId)),
       ])
