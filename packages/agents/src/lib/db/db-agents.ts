@@ -161,6 +161,7 @@ export function createAgentsDb() {
       triggered_by?: string | null
       user_ip?: string | null
       user_agent?: string | null
+      call_depth?: number
     }): Promise<string> {
       const result = await db
         .insert(aiosEvents)
@@ -173,6 +174,7 @@ export function createAgentsDb() {
           triggered_by: event.triggered_by ?? null,
           user_ip: event.user_ip ?? null,
           user_agent: event.user_agent ?? null,
+          call_depth: event.call_depth ?? 0,
           status: 'running',
           triggered_at: new Date(),
           started_at: new Date(),

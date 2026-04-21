@@ -108,6 +108,7 @@ export async function executeTask(
     triggered_by: task.triggered_by ?? null,
     user_ip: task.user_ip ?? null,
     user_agent: task.user_agent ?? null,
+    call_depth: depth,
   })
 
   // 4. Executa skill

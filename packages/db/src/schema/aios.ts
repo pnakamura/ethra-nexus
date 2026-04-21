@@ -8,6 +8,7 @@ import {
   integer,
   numeric,
   index,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { tenants, agents } from './core'
 
@@ -41,6 +42,8 @@ export const aiosEvents = pgTable(
     triggered_at: timestamp('triggered_at').defaultNow().notNull(),
     started_at: timestamp('started_at').defaultNow().notNull(),
     completed_at: timestamp('completed_at'),
+    call_depth: integer('call_depth').notNull().default(0),
+    parent_event_id: uuid('parent_event_id').references((): AnyPgColumn => aiosEvents.id, { onDelete: 'set null' }),
   },
   (table) => ({
     aiosEventsStatusIdx: index('aios_events_tenant_status_idx').on(
