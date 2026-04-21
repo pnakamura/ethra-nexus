@@ -1,7 +1,7 @@
 // packages/agents/src/__tests__/event-bus.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-function makeDbReturning(rows: unknown[]) {
+function makeSelectResult(rows: unknown[]) {
   const p = Promise.resolve(rows)
   Object.assign(p, { limit: vi.fn().mockResolvedValue(rows) })
   return p
@@ -41,8 +41,9 @@ describe('matchesFilter', () => {
 })
 
 describe('drainEventQueue', () => {
+  beforeEach(() => { drainEventQueue() })
+
   it('retorna array vazio se fila estiver vazia', () => {
-    drainEventQueue() // limpa estado de testes anteriores
     expect(drainEventQueue()).toEqual([])
   })
 })
@@ -64,7 +65,7 @@ describe('emitEvent', () => {
       output_channel: 'api',
       enabled: true,
     }
-    mockWhere.mockReturnValue(makeDbReturning([subscription]))
+    mockWhere.mockReturnValue(makeSelectResult([subscription]))
 
     await emitEvent('budget_alert', { threshold: 90 }, 'tenant-1')
 
@@ -85,7 +86,7 @@ describe('emitEvent', () => {
       output_channel: 'api',
       enabled: true,
     }
-    mockWhere.mockReturnValue(makeDbReturning([subscription]))
+    mockWhere.mockReturnValue(makeSelectResult([subscription]))
 
     await emitEvent('budget_alert', { threshold: 50 }, 'tenant-1')
 
@@ -93,10 +94,17 @@ describe('emitEvent', () => {
   })
 
   it('não enfileira quando DB retorna zero subscriptions', async () => {
-    mockWhere.mockReturnValue(makeDbReturning([]))
+    mockWhere.mockReturnValue(makeSelectResult([]))
 
     await emitEvent('wiki_ingested', { page_id: 'p1' }, 'tenant-2')
 
+    expect(drainEventQueue()).toHaveLength(0)
+  })
+
+  it('erro no DB é não-fatal (não propaga exceção)', async () => {
+    mockWhere.mockRejectedValue(new Error('DB connection lost'))
+
+    await expect(emitEvent('budget_alert', {}, 'tenant-1')).resolves.toBeUndefined()
     expect(drainEventQueue()).toHaveLength(0)
   })
 })

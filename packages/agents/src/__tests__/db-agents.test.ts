@@ -5,7 +5,6 @@ function dbRows(rows: unknown[]) {
   const p = Promise.resolve(rows)
   Object.assign(p, {
     limit: vi.fn().mockResolvedValue(rows),
-    orderBy: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(rows) }),
   })
   return p
 }
@@ -34,7 +33,6 @@ vi.mock('@ethra-nexus/db', () => ({
   budgets: {},
   auditLog: {},
   aiosEvents: {},
-  agentSchedules: {},
   providerUsageLog: {},
   eq: vi.fn(),
   and: vi.fn(),
@@ -85,6 +83,7 @@ describe('canExecute', () => {
     const db = createAgentsDb()
     const result = await db.canExecute('agent-missing', '2026-04', 0.01)
     expect(result.allowed).toBe(false)
+    expect(result.reason).toBe('Agent not found')
   })
 
   it('nega quando agente não está ativo', async () => {
@@ -92,6 +91,7 @@ describe('canExecute', () => {
     const db = createAgentsDb()
     const result = await db.canExecute('agent-1', '2026-04', 0.01)
     expect(result.allowed).toBe(false)
+    expect(result.reason).toMatch(/paused/)
   })
 })
 
