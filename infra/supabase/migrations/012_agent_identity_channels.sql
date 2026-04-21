@@ -32,3 +32,18 @@ ALTER TABLE agent_channels ENABLE ROW LEVEL SECURITY;
 
 CREATE INDEX IF NOT EXISTS agent_channels_agent_id_idx  ON agent_channels(agent_id);
 CREATE INDEX IF NOT EXISTS agent_channels_tenant_id_idx ON agent_channels(tenant_id);
+
+-- RLS policies
+CREATE POLICY "service_role_full_access" ON agent_channels
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "tenant_members_read" ON agent_channels
+  FOR SELECT USING (tenant_id = ANY(user_tenant_ids()));
+
+CREATE POLICY "tenant_admins_write" ON agent_channels
+  FOR ALL USING (user_is_tenant_admin(tenant_id));
+
+-- Updated_at trigger
+CREATE TRIGGER agent_channels_updated_at
+  BEFORE UPDATE ON agent_channels
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
