@@ -1,4 +1,5 @@
 import type { SkillId, AgentResult, AgentContext } from '@ethra-nexus/core'
+import { sanitizeForHtml } from '@ethra-nexus/core'
 import { embed, extractPagesFromContent } from '@ethra-nexus/wiki'
 import { createRegistryFromEnv } from '../provider'
 import { createWikiDb } from '../db'
@@ -235,7 +236,9 @@ async function executeWikiIngest(
   ts: string,
 ): Promise<AgentResult<SkillOutput>> {
   const content = typeof input['content'] === 'string' ? input['content'] : ''
-  const sourceName = typeof input['source_name'] === 'string' ? input['source_name'] : 'unknown'
+  const sourceName = sanitizeForHtml(
+    typeof input['source_name'] === 'string' ? input['source_name'] : 'unknown'
+  )
 
   if (!content) {
     return {
@@ -293,7 +296,11 @@ async function executeWikiIngest(
     `Ingestão concluída: ${extraction.pages.length} páginas extraídas, ${persisted} persistidas.`,
     `Fonte: ${sourceName}.`,
   ]
-  if (failedSlugs.length > 0) parts.push(`Falhas: ${failedSlugs.join(', ')}.`)
+  if (failedSlugs.length > 0) {
+    const reported = failedSlugs.slice(0, 10).map(s => sanitizeForHtml(s))
+    const extra = failedSlugs.length > 10 ? ` (+${failedSlugs.length - 10} mais)` : ''
+    parts.push(`Falhas: ${reported.join(', ')}${extra}.`)
+  }
   if (extraction.invalid_reasons.length > 0) {
     parts.push(`Páginas inválidas descartadas: ${extraction.invalid_reasons.length}.`)
   }

@@ -7,6 +7,10 @@ import { extractPagesFromContent } from '@ethra-nexus/wiki'  // mocked below —
 const mockComplete = vi.fn()
 const mockUpsertStrategicPage = vi.fn()
 
+vi.mock('@ethra-nexus/core', () => ({
+  sanitizeForHtml: (content: string) => content, // passthrough para testes
+}))
+
 vi.mock('../lib/provider', () => ({
   createRegistryFromEnv: () => ({ complete: mockComplete }),
 }))
