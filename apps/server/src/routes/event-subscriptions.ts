@@ -2,7 +2,13 @@ import type { FastifyInstance } from 'fastify'
 import { eq, and } from 'drizzle-orm'
 import { getDb, agentEventSubscriptions } from '@ethra-nexus/db'
 
-const VALID_EVENT_TYPES = ['budget_alert', 'wiki_ingested', 'webhook'] as const
+const VALID_EVENT_TYPES = [
+  'budget_alert',
+  'wiki_ingested',
+  'webhook',
+  'task_completed',
+  'alert_triggered',
+] as const
 const VALID_CHANNELS = ['api', 'whatsapp', 'both'] as const
 
 export async function eventSubscriptionsRoutes(app: FastifyInstance) {
