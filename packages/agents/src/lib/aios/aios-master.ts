@@ -5,6 +5,8 @@ import { createAgentsDb } from '../db/db-agents'
 import { executeSkill, type SkillInput, type SkillOutput } from '../skills/skill-executor'
 import { emitEvent } from '../scheduler/event-bus'
 
+const MAX_CALL_DEPTH = 3
+
 export interface AiosTaskRequest {
   tenant_id: string
   agent_id: string
@@ -36,7 +38,6 @@ export async function executeTask(
   const ts = new Date().toISOString()
   const activationMode = task.activation_mode ?? 'on_demand'
 
-  const MAX_CALL_DEPTH = 3
   const depth = task.call_depth ?? 0
   if (depth > MAX_CALL_DEPTH) {
     return {
@@ -63,14 +64,14 @@ export async function executeTask(
   if (!agent) {
     return {
       ok: false,
-      error: { code: 'SKILL_NOT_FOUND', message: 'Agent not found', retryable: false },
+      error: { code: 'AGENT_NOT_FOUND', message: 'Agent not found', retryable: false },
       agent_id: task.agent_id,
       skill_id: task.skill_id,
       timestamp: ts,
     }
   }
 
-  // 2. Pre-check: status
+  // 2a. Pre-check: status
   if (agent.status !== 'active') {
     return {
       ok: false,
@@ -81,7 +82,7 @@ export async function executeTask(
     }
   }
 
-  // 2. Pre-check: budget
+  // 2b. Pre-check: budget
   const budgetCheck = await agentsDb.canExecute(task.agent_id, month, 0.02)
   if (!budgetCheck.allowed) {
     return {
@@ -205,6 +206,7 @@ export async function executeTask(
 
     // Emitir task_completed — habilita chains multi-agente
     // __call_depth: depth + 1 permite que o próximo agente saiba sua posição na chain
+    // task_completed emitido apenas em sucesso — falhas não propagam a chain
     await emitEvent('task_completed', {
       skill_id: task.skill_id,
       agent_id: task.agent_id,
