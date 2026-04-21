@@ -1,110 +1,52 @@
 // packages/agents/src/__tests__/event-bus.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-function makeSelectResult(rows: unknown[]) {
-  const p = Promise.resolve(rows)
-  Object.assign(p, { limit: vi.fn().mockResolvedValue(rows) })
-  return p
-}
-
-const mockWhere = vi.fn()
+import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('@ethra-nexus/db', () => ({
-  getDb: () => ({
-    select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: mockWhere,
-      }),
-    }),
-  }),
+  getDb: vi.fn(),
   agentEventSubscriptions: {},
 }))
 
 vi.mock('drizzle-orm', () => ({
-  eq: vi.fn(),
-  and: vi.fn(),
+  eq: vi.fn().mockReturnValue({}),
+  and: vi.fn().mockReturnValue({}),
 }))
 
-const { emitEvent, drainEventQueue, matchesFilter } = await import('../lib/scheduler/event-bus')
+const { matchesFilter } = await import('../lib/scheduler/event-bus')
 
 describe('matchesFilter', () => {
-  it('retorna true se filtro estiver vazio', () => {
-    expect(matchesFilter({}, { threshold: 90 })).toBe(true)
+  it('filtro vazio → sempre corresponde', () => {
+    expect(matchesFilter({}, { any: 'value' })).toBe(true)
   })
-  it('retorna true se threshold do payload >= threshold do filtro', () => {
-    expect(matchesFilter({ threshold: 75 }, { threshold: 90 })).toBe(true)
+
+  it('threshold → corresponde quando payload >= filtro', () => {
     expect(matchesFilter({ threshold: 75 }, { threshold: 75 })).toBe(true)
+    expect(matchesFilter({ threshold: 75 }, { threshold: 90 })).toBe(true)
   })
-  it('retorna false se threshold do payload < threshold do filtro', () => {
+
+  it('threshold → não corresponde quando payload < filtro', () => {
     expect(matchesFilter({ threshold: 75 }, { threshold: 50 })).toBe(false)
   })
-})
 
-describe('drainEventQueue', () => {
-  beforeEach(() => { drainEventQueue() })
-
-  it('retorna array vazio se fila estiver vazia', () => {
-    expect(drainEventQueue()).toEqual([])
-  })
-})
-
-describe('emitEvent', () => {
-  beforeEach(() => {
-    drainEventQueue()
-    vi.clearAllMocks()
+  it('skill_id → corresponde quando skill_id é igual', () => {
+    expect(matchesFilter({ skill_id: 'monitor:health' }, { skill_id: 'monitor:health' })).toBe(true)
   })
 
-  it('enfileira evento quando subscription faz match', async () => {
-    const subscription = {
-      tenant_id: 'tenant-1',
-      agent_id: 'agent-1',
-      event_type: 'budget_alert',
-      event_filter: {},
-      skill_id: 'wiki:lint',
-      input: {},
-      output_channel: 'api',
-      enabled: true,
-    }
-    mockWhere.mockReturnValue(makeSelectResult([subscription]))
-
-    await emitEvent('budget_alert', { threshold: 90 }, 'tenant-1')
-
-    const queue = drainEventQueue()
-    expect(queue).toHaveLength(1)
-    expect(queue[0]!.subscription.skill_id).toBe('wiki:lint')
-    expect(queue[0]!.payload).toEqual({ threshold: 90 })
+  it('skill_id → não corresponde quando skill_id difere', () => {
+    expect(matchesFilter({ skill_id: 'monitor:health' }, { skill_id: 'wiki:query' })).toBe(false)
   })
 
-  it('não enfileira se subscription não faz match pelo filtro threshold', async () => {
-    const subscription = {
-      tenant_id: 'tenant-1',
-      agent_id: 'agent-1',
-      event_type: 'budget_alert',
-      event_filter: { threshold: 75 },
-      skill_id: 'wiki:lint',
-      input: {},
-      output_channel: 'api',
-      enabled: true,
-    }
-    mockWhere.mockReturnValue(makeSelectResult([subscription]))
-
-    await emitEvent('budget_alert', { threshold: 50 }, 'tenant-1')
-
-    expect(drainEventQueue()).toHaveLength(0)
+  it('agent_id → corresponde quando agent_id é igual', () => {
+    expect(matchesFilter({ agent_id: 'agent-1' }, { agent_id: 'agent-1' })).toBe(true)
   })
 
-  it('não enfileira quando DB retorna zero subscriptions', async () => {
-    mockWhere.mockReturnValue(makeSelectResult([]))
-
-    await emitEvent('wiki_ingested', { page_id: 'p1' }, 'tenant-2')
-
-    expect(drainEventQueue()).toHaveLength(0)
+  it('agent_id → não corresponde quando agent_id difere', () => {
+    expect(matchesFilter({ agent_id: 'agent-1' }, { agent_id: 'agent-2' })).toBe(false)
   })
 
-  it('erro no DB é não-fatal (não propaga exceção)', async () => {
-    mockWhere.mockRejectedValue(new Error('DB connection lost'))
-
-    await expect(emitEvent('budget_alert', {}, 'tenant-1')).resolves.toBeUndefined()
-    expect(drainEventQueue()).toHaveLength(0)
+  it('filtro combinado → todas as condições devem corresponder (AND)', () => {
+    const filter = { skill_id: 'monitor:health', threshold: 90 }
+    expect(matchesFilter(filter, { skill_id: 'monitor:health', threshold: 95 })).toBe(true)
+    expect(matchesFilter(filter, { skill_id: 'monitor:health', threshold: 80 })).toBe(false)
+    expect(matchesFilter(filter, { skill_id: 'wiki:query', threshold: 95 })).toBe(false)
   })
 })

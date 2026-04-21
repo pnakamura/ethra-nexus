@@ -1,7 +1,12 @@
 import { eq, and } from 'drizzle-orm'
 import { getDb, agentEventSubscriptions } from '@ethra-nexus/db'
 
-export type BusEventType = 'budget_alert' | 'wiki_ingested' | 'webhook'
+export type BusEventType =
+  | 'budget_alert'
+  | 'wiki_ingested'
+  | 'webhook'
+  | 'task_completed'
+  | 'alert_triggered'
 
 export interface QueuedEvent {
   subscription: {
@@ -52,7 +57,7 @@ export async function emitEvent(
       })
     }
   } catch {
-    // DB failure is non-fatal — event queue remains unchanged
+    // DB failure é non-fatal — event queue permanece inalterado
   }
 }
 
@@ -60,13 +65,26 @@ export function drainEventQueue(): QueuedEvent[] {
   return eventQueue.splice(0, eventQueue.length)
 }
 
+// Verifica se o payload satisfaz todos os critérios do filtro (AND).
+// Chaves suportadas: threshold (numérico >=), skill_id (igualdade), agent_id (igualdade).
+// Filtro vazio → sempre corresponde.
 export function matchesFilter(
   filter: Record<string, unknown>,
   payload: Record<string, unknown>,
 ): boolean {
   if (Object.keys(filter).length === 0) return true
+
   if ('threshold' in filter) {
-    return Number(payload['threshold']) >= Number(filter['threshold'])
+    if (Number(payload['threshold']) < Number(filter['threshold'])) return false
   }
+
+  if ('skill_id' in filter) {
+    if (payload['skill_id'] !== filter['skill_id']) return false
+  }
+
+  if ('agent_id' in filter) {
+    if (payload['agent_id'] !== filter['agent_id']) return false
+  }
+
   return true
 }
