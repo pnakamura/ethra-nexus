@@ -8,6 +8,7 @@ import {
   numeric,
   boolean,
   uniqueIndex,
+  unique,
   index,
 } from 'drizzle-orm/pg-core'
 
@@ -47,6 +48,14 @@ export const agents = pgTable('agents', {
   system_prompt: text('system_prompt').notNull().default(''),
   status: text('status').notNull().default('active'),
   budget_monthly: numeric('budget_monthly', { precision: 10, scale: 2 }).notNull().default('50.00'),
+  // Identidade expandida (migration 012)
+  description: text('description'),
+  avatar_url: text('avatar_url'),
+  tags: text('tags').array().notNull().default([]),
+  system_prompt_extra: text('system_prompt_extra'),
+  response_language: text('response_language').notNull().default('pt-BR'),
+  tone: text('tone').notNull().default('professional'),
+  restrictions: text('restrictions').array().notNull().default([]),
   created_at: timestamp('created_at').defaultNow().notNull(),
   updated_at: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
@@ -202,4 +211,21 @@ export const orgChart = pgTable('org_chart', {
   created_at: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
   orgChartAgentIdx: uniqueIndex('org_chart_agent_idx').on(table.tenant_id, table.agent_id),
+}))
+
+// ── Agent Channels — canais de comunicação por agente ────────
+
+export const agentChannels = pgTable('agent_channels', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenant_id: uuid('tenant_id').notNull().references(() => tenants.id),
+  agent_id: uuid('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  channel_type: text('channel_type').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  config: jsonb('config').notNull().default({}),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  agentChannelsAgentIdIdx: index('agent_channels_agent_id_idx').on(table.agent_id),
+  agentChannelsTenantIdIdx: index('agent_channels_tenant_id_idx').on(table.tenant_id),
+  agentChannelsUnique: unique('agent_channels_agent_channel_type_unique').on(table.agent_id, table.channel_type),
 }))
