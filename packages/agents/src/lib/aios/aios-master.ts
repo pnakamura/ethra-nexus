@@ -15,6 +15,7 @@ export interface AiosTaskRequest {
   triggered_by?: string | null   // JWT userId string, 'system', ou null
   user_ip?: string | null
   user_agent?: string | null
+  call_depth?: number  // profundidade de orquestração; bloqueado quando > MAX_CALL_DEPTH
 }
 
 // Ciclo de vida AIOS Master:
@@ -34,6 +35,22 @@ export async function executeTask(
   const month = new Date().toISOString().slice(0, 7)
   const ts = new Date().toISOString()
   const activationMode = task.activation_mode ?? 'on_demand'
+
+  const MAX_CALL_DEPTH = 3
+  const depth = task.call_depth ?? 0
+  if (depth > MAX_CALL_DEPTH) {
+    return {
+      ok: false,
+      error: {
+        code: 'MAX_DEPTH_EXCEEDED',
+        message: `Profundidade máxima de orquestração (${MAX_CALL_DEPTH}) atingida`,
+        retryable: false,
+      },
+      agent_id: task.agent_id,
+      skill_id: task.skill_id,
+      timestamp: ts,
+    }
+  }
 
   // 1. Carrega agente — verifica que pertence ao tenant
   const agentRows = await db
@@ -185,6 +202,16 @@ export async function executeTask(
         }
       }
     }
+
+    // Emitir task_completed — habilita chains multi-agente
+    // __call_depth: depth + 1 permite que o próximo agente saiba sua posição na chain
+    await emitEvent('task_completed', {
+      skill_id: task.skill_id,
+      agent_id: task.agent_id,
+      tokens: totalTokens,
+      cost_usd,
+      __call_depth: depth + 1,
+    }, task.tenant_id)
   } else {
     await agentsDb.updateAiosEvent(eventId, {
       status: 'error',
