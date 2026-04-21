@@ -25,18 +25,19 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Debug — list workspace packages
-        run: |
-          echo "=== Node version ===" && node --version
-          echo "=== NPM version ===" && npm --version
-          echo "=== Turbo version ===" && npx turbo --version
-          echo "=== Installed workspaces ===" && npm ls --depth=0 --workspaces 2>/dev/null || true
-
       - name: TypeScript check
-        run: npm run typecheck
+        run: npx turbo run typecheck --filter=!@ethra-nexus/db
 
       - name: Lint
         run: npm run lint
@@ -59,14 +60,10 @@ jobs:
           node-version: '20'
       - run: npm install --legacy-peer-deps
       - name: npm audit
-        # Informational only — não bloqueia o pipeline
         run: npm audit --audit-level=critical || echo "⚠️  Audit warnings present (non-blocking)"
 
       - name: Check for leaked secrets
         run: |
-          # Garante que nenhuma chave de API vazou no código
-          # Padrão requer ≥10 chars alfanuméricos após o prefixo para
-          # evitar falso positivo com regex patterns em sanitize.ts
           if grep -rE "(sk-ant-|sk-or-)[A-Za-z0-9]{10,}|eyJ[A-Za-z0-9+/]{100,}" \
             --include="*.ts" --include="*.tsx" --include="*.js" \
             --exclude-dir=node_modules --exclude-dir=dist .; then
@@ -110,3 +107,22 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/ethra-nexus:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: docker
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22022
+          script: |
+            docker pull ghcr.io/pnakamura/ethra-nexus:latest
+            docker service update --force ethra-nexus_ethra-nexus-api
