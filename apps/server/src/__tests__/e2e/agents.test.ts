@@ -703,6 +703,25 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Channels endpoints', ()
     expect(cfg['webhook_url']).toBe('https://meusite.com/hook')
   })
 
+  it('PATCH /agents/:id/channels/:channel_type retorna 400 se config merged fica inválido', async () => {
+    // Create whatsapp channel with required evolution_instance
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'whatsapp', config: { evolution_instance: 'nexus-wa' } },
+    })
+    // PATCH sends config that overwrites evolution_instance with empty string — merged config is invalid
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}/channels/whatsapp`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { config: { evolution_instance: '' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json<{ error: string }>().error).toContain('evolution_instance')
+  })
+
   it('PATCH /agents/:id/channels/:channel_type retorna 404 para canal inexistente', async () => {
     const res = await app.inject({
       method: 'PATCH',
