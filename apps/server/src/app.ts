@@ -14,6 +14,7 @@ import { aiosRoutes } from './routes/aios'
 import { schedulesRoutes } from './routes/schedules'
 import { eventSubscriptionsRoutes } from './routes/event-subscriptions'
 import { webhookRoutes } from './routes/webhooks'
+import { agentSkillsRoutes } from './routes/agent-skills'
 import { startSchedulerLoop } from '@ethra-nexus/agents'
 
 // ============================================================
@@ -81,6 +82,7 @@ export async function buildApp() {
   await app.register(schedulesRoutes, { prefix: '/api/v1' })
   await app.register(eventSubscriptionsRoutes, { prefix: '/api/v1' })
   await app.register(webhookRoutes, { prefix: '/api/v1' })
+  await app.register(agentSkillsRoutes, { prefix: '/api/v1' })
 
   startSchedulerLoop()
 

@@ -1,5 +1,5 @@
 // apps/server/src/__tests__/e2e/agents.test.ts
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 
 vi.mock('@ethra-nexus/agents', async (importOriginal) => {
@@ -395,5 +395,174 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Agent CRUD endpoints', 
     const agent = list.json<{ data: Array<{ skills: unknown[]; channels: unknown[] }> }>().data[0]
     expect(agent?.skills).toBeDefined()
     expect(agent?.channels).toBeDefined()
+  })
+})
+
+// ── E2E: Skills individuais ──────────────────────────────────
+
+describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Skills endpoints', () => {
+  let app: FastifyInstance
+  let token: string
+  let agentId: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let db: any
+
+  beforeAll(async () => {
+    db = await import('@ethra-nexus/db')
+    const { buildApp } = await import('../../app')
+    app = await buildApp()
+    await app.ready()
+    token = await app.jwt.sign({ tenantId: TEST_TENANT_ID, email: 'test@test.com', role: 'admin' })
+  })
+
+  afterAll(async () => { await app.close() })
+
+  beforeEach(async () => {
+    const drizzle = db.getDb()
+    await drizzle.delete(db.agents).where(db.eq(db.agents.tenant_id, TEST_TENANT_ID))
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: 'Skills Test Agent', slug: 'skills-test', role: 'support' },
+    })
+    agentId = res.json<{ data: { id: string } }>().data.id
+  })
+
+  afterEach(async () => {
+    const drizzle = db.getDb()
+    await drizzle.delete(db.agents).where(db.eq(db.agents.tenant_id, TEST_TENANT_ID))
+  })
+
+  it('POST /agents/:id/skills retorna 201 com skill criada', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'wiki:query', enabled: true },
+    })
+    expect(res.statusCode).toBe(201)
+    const body = res.json<{ data: { skill_name: string; enabled: boolean } }>()
+    expect(body.data.skill_name).toBe('wiki:query')
+    expect(body.data.enabled).toBe(true)
+  })
+
+  it('POST /agents/:id/skills retorna 400 para skill_id inválido', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'invalid-skill' },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('POST /agents/:id/skills retorna 404 para agente de outro tenant', async () => {
+    const otherToken = await app.jwt.sign({ tenantId: '00000000-0000-0000-0000-000000000099', email: 'x@x.com', role: 'admin' })
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${otherToken}` },
+      payload: { skill_id: 'wiki:query' },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('POST /agents/:id/skills retorna 404 para agente arquivado', async () => {
+    await app.inject({ method: 'DELETE', url: `/api/v1/agents/${agentId}`, headers: { authorization: `Bearer ${token}` } })
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'wiki:query' },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('POST /agents/:id/skills retorna 409 para skill já existente', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'wiki:query' },
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'wiki:query' },
+    })
+    expect(res.statusCode).toBe(409)
+  })
+
+  it('PATCH /agents/:id/skills/:skill_name atualiza enabled', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'wiki:query', enabled: true },
+    })
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}/skills/wiki:query`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { enabled: false },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<{ data: { enabled: boolean } }>()
+    expect(body.data.enabled).toBe(false)
+  })
+
+  it('PATCH /agents/:id/skills/:skill_name atualiza skill_config parcialmente', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'wiki:query', max_tokens_per_call: 1000 },
+    })
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}/skills/wiki:query`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { max_calls_per_hour: 50 },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<{ data: { skill_config: Record<string, unknown> } }>()
+    expect(body.data.skill_config['max_tokens_per_call']).toBe(1000)
+    expect(body.data.skill_config['max_calls_per_hour']).toBe(50)
+  })
+
+  it('PATCH /agents/:id/skills/:skill_name retorna 404 para skill inexistente', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}/skills/wiki:query`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { enabled: false },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('DELETE /agents/:id/skills/:skill_name remove skill (204)', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/skills`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { skill_id: 'wiki:query' },
+    })
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${agentId}/skills/wiki:query`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.statusCode).toBe(204)
+  })
+
+  it('DELETE /agents/:id/skills/:skill_name retorna 404 para skill inexistente', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${agentId}/skills/wiki:query`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.statusCode).toBe(404)
   })
 })
