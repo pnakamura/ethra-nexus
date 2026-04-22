@@ -22,7 +22,7 @@ export async function agentChannelsRoutes(app: FastifyInstance) {
     Body: {
       channel_type: string
       enabled?: boolean
-      config: Record<string, unknown>
+      config?: Record<string, unknown>
     }
   }>('/agents/:id/channels', async (request, reply) => {
     const db = getDb()
@@ -72,6 +72,10 @@ export async function agentChannelsRoutes(app: FastifyInstance) {
     const db = getDb()
     const { id: agentId, channel_type } = request.params
     const body = request.body
+
+    if (!isValidChannelType(channel_type)) {
+      return reply.status(400).send({ error: `Invalid channel_type: "${channel_type}"` })
+    }
 
     const agent = await requireAgent(agentId, request.tenantId)
     if (!agent) return reply.status(404).send({ error: 'Agent not found' })
@@ -128,6 +132,10 @@ export async function agentChannelsRoutes(app: FastifyInstance) {
   }>('/agents/:id/channels/:channel_type', async (request, reply) => {
     const db = getDb()
     const { id: agentId, channel_type } = request.params
+
+    if (!isValidChannelType(channel_type)) {
+      return reply.status(400).send({ error: `Invalid channel_type: "${channel_type}"` })
+    }
 
     const agent = await requireAgent(agentId, request.tenantId)
     if (!agent) return reply.status(404).send({ error: 'Agent not found' })

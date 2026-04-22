@@ -84,6 +84,10 @@ export async function agentSkillsRoutes(app: FastifyInstance) {
     const { id: agentId, skill_name } = request.params
     const body = request.body
 
+    if (!isValidSkillId(skill_name)) {
+      return reply.status(400).send({ error: `Invalid skill_id: "${skill_name}"` })
+    }
+
     const agent = await requireAgent(agentId, request.tenantId)
     if (!agent) return reply.status(404).send({ error: 'Agent not found' })
 
@@ -136,6 +140,10 @@ export async function agentSkillsRoutes(app: FastifyInstance) {
   }>('/agents/:id/skills/:skill_name', async (request, reply) => {
     const db = getDb()
     const { id: agentId, skill_name } = request.params
+
+    if (!isValidSkillId(skill_name)) {
+      return reply.status(400).send({ error: `Invalid skill_id: "${skill_name}"` })
+    }
 
     const agent = await requireAgent(agentId, request.tenantId)
     if (!agent) return reply.status(404).send({ error: 'Agent not found' })
