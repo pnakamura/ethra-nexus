@@ -566,3 +566,174 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Skills endpoints', () =
     expect(res.statusCode).toBe(404)
   })
 })
+
+// ── E2E: Canais individuais ──────────────────────────────────
+
+describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Channels endpoints', () => {
+  let app: FastifyInstance
+  let token: string
+  let agentId: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let db: any
+
+  beforeAll(async () => {
+    db = await import('@ethra-nexus/db')
+    const { buildApp } = await import('../../app')
+    app = await buildApp()
+    await app.ready()
+    token = await app.jwt.sign({ tenantId: TEST_TENANT_ID, email: 'test@test.com', role: 'admin' })
+  })
+
+  afterAll(async () => { await app.close() })
+
+  beforeEach(async () => {
+    const drizzle = db.getDb()
+    await drizzle.delete(db.agents).where(db.eq(db.agents.tenant_id, TEST_TENANT_ID))
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: 'Channels Test Agent', slug: 'channels-test', role: 'support' },
+    })
+    agentId = res.json<{ data: { id: string } }>().data.id
+  })
+
+  afterEach(async () => {
+    const drizzle = db.getDb()
+    await drizzle.delete(db.agents).where(db.eq(db.agents.tenant_id, TEST_TENANT_ID))
+  })
+
+  it('POST /agents/:id/channels retorna 201 com canal criado', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'whatsapp', config: { evolution_instance: 'nexus-wa' } },
+    })
+    expect(res.statusCode).toBe(201)
+    const body = res.json<{ data: { channel_type: string; enabled: boolean } }>()
+    expect(body.data.channel_type).toBe('whatsapp')
+    expect(body.data.enabled).toBe(true)
+  })
+
+  it('POST /agents/:id/channels retorna 400 para channel_type inválido', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'telegram', config: {} },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('POST /agents/:id/channels retorna 400 para config incompleto (whatsapp sem evolution_instance)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'whatsapp', config: {} },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json<{ error: string }>().error).toContain('evolution_instance')
+  })
+
+  it('POST /agents/:id/channels retorna 404 para agente de outro tenant', async () => {
+    const otherToken = await app.jwt.sign({ tenantId: '00000000-0000-0000-0000-000000000099', email: 'x@x.com', role: 'admin' })
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${otherToken}` },
+      payload: { channel_type: 'webchat', config: {} },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('POST /agents/:id/channels retorna 404 para agente arquivado', async () => {
+    await app.inject({ method: 'DELETE', url: `/api/v1/agents/${agentId}`, headers: { authorization: `Bearer ${token}` } })
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'webchat', config: {} },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('POST /agents/:id/channels retorna 409 para canal já existente', async () => {
+    const payload = { channel_type: 'webchat', config: {} }
+    await app.inject({ method: 'POST', url: `/api/v1/agents/${agentId}/channels`, headers: { authorization: `Bearer ${token}` }, payload })
+    const res = await app.inject({ method: 'POST', url: `/api/v1/agents/${agentId}/channels`, headers: { authorization: `Bearer ${token}` }, payload })
+    expect(res.statusCode).toBe(409)
+  })
+
+  it('PATCH /agents/:id/channels/:channel_type atualiza enabled', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'webchat', config: {} },
+    })
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}/channels/webchat`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { enabled: false },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json<{ data: { enabled: boolean } }>().data.enabled).toBe(false)
+  })
+
+  it('PATCH /agents/:id/channels/:channel_type atualiza config parcialmente', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'whatsapp', config: { evolution_instance: 'nexus-wa' } },
+    })
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}/channels/whatsapp`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { config: { webhook_url: 'https://meusite.com/hook' } },
+    })
+    expect(res.statusCode).toBe(200)
+    const cfg = res.json<{ data: { config: Record<string, unknown> } }>().data.config
+    // evolution_instance preservado, webhook_url adicionado
+    expect(cfg['evolution_instance']).toBe('nexus-wa')
+    expect(cfg['webhook_url']).toBe('https://meusite.com/hook')
+  })
+
+  it('PATCH /agents/:id/channels/:channel_type retorna 404 para canal inexistente', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}/channels/webchat`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { enabled: false },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('DELETE /agents/:id/channels/:channel_type remove canal (204)', async () => {
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/agents/${agentId}/channels`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel_type: 'webchat', config: {} },
+    })
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${agentId}/channels/webchat`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.statusCode).toBe(204)
+  })
+
+  it('DELETE /agents/:id/channels/:channel_type retorna 404 para canal inexistente', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${agentId}/channels/webchat`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.statusCode).toBe(404)
+  })
+})
