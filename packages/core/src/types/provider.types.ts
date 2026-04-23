@@ -145,6 +145,12 @@ export const SYSTEM_PROVIDER_MAP: Record<BuiltinSkillId, SkillProviderConfig> = 
     primary: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     sensitive_data: true,    // documentos brutos podem ter dados pessoais
   },
+
+  // ── A2A skills ─────────────────────────────────────────
+  'a2a:call': {
+    primary: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    sensitive_data: true,    // delegação pode transportar dados sensíveis
+  },
 }
 
 // ── Aliases de compatibilidade ────────────────────────────────

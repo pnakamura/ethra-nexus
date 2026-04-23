@@ -6,6 +6,7 @@
 // Nenhuma exceção. Nenhum "confia que vem certo".
 // ============================================================
 
+import { lookup } from 'node:dns/promises'
 import type { WikiPageType, WikiConfidence, WikiScope } from '../types/wiki.types'
 
 // ── Wiki Scope ───────────────────────────────────────────────
@@ -181,5 +182,33 @@ export class SecurityValidationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'SecurityValidationError'
+  }
+}
+
+const BLOCKED_RANGES = [
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^127\./,
+  /^169\.254\./,
+  /^0\./,
+  /^::1$/,
+]
+
+export async function validateExternalUrl(url: string): Promise<void> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new SecurityValidationError('URL inválida')
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new SecurityValidationError('A2A agents devem usar HTTPS')
+  }
+  const addresses = await lookup(parsed.hostname, { all: true })
+  for (const { address } of addresses) {
+    if (BLOCKED_RANGES.some((re) => re.test(address))) {
+      throw new SecurityValidationError(`IP bloqueado para agente A2A: ${address}`)
+    }
   }
 }

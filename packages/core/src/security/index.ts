@@ -8,6 +8,7 @@ export {
   validateFileSystemPath,
   validateContentLength,
   validateUUID,
+  validateExternalUrl,
   SecurityValidationError,
 } from './validate'
 

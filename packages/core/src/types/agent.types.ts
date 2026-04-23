@@ -58,6 +58,7 @@ export type BuiltinSkillId =
   | 'monitor:alert'     // avalia condições e dispara alertas
   | 'data:analyze'      // analisa dados estruturados (CSV, JSON, planilhas)
   | 'data:extract'      // extrai dados de documentos não-estruturados
+  | 'a2a:call'          // delega task para agente externo via protocolo A2A
 
 export type SkillId = BuiltinSkillId | `custom:${string}`
 
@@ -371,6 +372,7 @@ export type AgentErrorCode =
   | 'AI_ERROR'
   | 'WIKI_ERROR'
   | 'CHANNEL_ERROR'
+  | 'EXTERNAL_AGENT_ERROR'
   | 'UNKNOWN'
 
 export interface AiosEvent {
@@ -378,7 +380,7 @@ export interface AiosEvent {
   tenant_id: string
   agent_id: string
   skill_id: SkillId
-  activation_mode: 'on_demand' | 'scheduled' | 'event'
+  activation_mode: 'on_demand' | 'scheduled' | 'event' | 'a2a'
   activation_source?: string      // schedule_id, event_type, ou channel_type
   payload: Record<string, unknown>
   result?: Record<string, unknown>

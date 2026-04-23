@@ -8,3 +8,4 @@ export * from './types/provider.types'
 
 // Security — validação e sanitização centralizadas
 export * from './security'
+export * from './types/a2a.types'
