@@ -63,3 +63,6 @@ infra/vps/secrets/*.enc
 infra/vps/secrets/encrypted/
 !infra/vps/secrets/manage-keys.sh
 !infra/vps/secrets/.gitkeep
+
+# Git worktrees
+.worktrees/
