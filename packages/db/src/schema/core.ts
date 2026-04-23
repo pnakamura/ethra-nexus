@@ -48,6 +48,10 @@ export const agents = pgTable('agents', {
   system_prompt: text('system_prompt').notNull().default(''),
   status: text('status').notNull().default('active'),
   budget_monthly: numeric('budget_monthly', { precision: 10, scale: 2 }).notNull().default('50.00'),
+  wiki_enabled: boolean('wiki_enabled').notNull().default(true),
+  wiki_top_k: integer('wiki_top_k').notNull().default(5),
+  wiki_min_score: numeric('wiki_min_score', { precision: 4, scale: 2 }).notNull().default('0.72'),
+  wiki_write_mode: text('wiki_write_mode').notNull().default('supervised'),
   // Identidade expandida (migration 012)
   description: text('description'),
   avatar_url: text('avatar_url'),

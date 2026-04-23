@@ -140,6 +140,7 @@ export const wikiAgentWrites = pgTable('wiki_agent_writes', {
   reviewed_by: text('reviewed_by'),
   reviewed_at: timestamp('reviewed_at'),
   origin_ticket_id: uuid('origin_ticket_id').references(() => tickets.id),
+  aios_event_id: uuid('aios_event_id'),
   metadata: jsonb('metadata').default({}),
   created_at: timestamp('created_at').defaultNow().notNull(),
   updated_at: timestamp('updated_at').defaultNow().notNull(),
