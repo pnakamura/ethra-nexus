@@ -240,7 +240,7 @@ export const agentChannels = pgTable('agent_channels', {
 export const a2aApiKeys = pgTable('a2a_api_keys', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenant_id: uuid('tenant_id').notNull().references(() => tenants.id),
-  agent_id: uuid('agent_id').notNull().references(() => agents.id),
+  agent_id: uuid('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   key_hash: text('key_hash').notNull(),
   key_prefix: text('key_prefix').notNull(),
