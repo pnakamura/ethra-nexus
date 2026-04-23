@@ -43,6 +43,7 @@ export const aiosEvents = pgTable(
     started_at: timestamp('started_at').defaultNow().notNull(),
     completed_at: timestamp('completed_at'),
     call_depth: integer('call_depth').notNull().default(0),
+    a2a_context_id: text('a2a_context_id'),
     parent_event_id: uuid('parent_event_id').references((): AnyPgColumn => aiosEvents.id, { onDelete: 'set null' }),
   },
   (table) => ({

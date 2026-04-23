@@ -52,6 +52,7 @@ export const agents = pgTable('agents', {
   wiki_top_k: integer('wiki_top_k').notNull().default(5),
   wiki_min_score: numeric('wiki_min_score', { precision: 4, scale: 2 }).notNull().default('0.72'),
   wiki_write_mode: text('wiki_write_mode').notNull().default('supervised'),
+  a2a_enabled: boolean('a2a_enabled').notNull().default(false),
   // Identidade expandida (migration 012)
   description: text('description'),
   avatar_url: text('avatar_url'),
@@ -232,4 +233,40 @@ export const agentChannels = pgTable('agent_channels', {
   agentChannelsAgentIdIdx: index('agent_channels_agent_id_idx').on(table.agent_id),
   agentChannelsTenantIdIdx: index('agent_channels_tenant_id_idx').on(table.tenant_id),
   agentChannelsUnique: unique('agent_channels_agent_channel_type_unique').on(table.agent_id, table.channel_type),
+}))
+
+// ── A2A API Keys — autenticação M2M para chamadas inbound ────
+
+export const a2aApiKeys = pgTable('a2a_api_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenant_id: uuid('tenant_id').notNull().references(() => tenants.id),
+  agent_id: uuid('agent_id').notNull().references(() => agents.id),
+  name: text('name').notNull(),
+  key_hash: text('key_hash').notNull(),
+  key_prefix: text('key_prefix').notNull(),
+  expires_at: timestamp('expires_at'),
+  last_used_at: timestamp('last_used_at'),
+  revoked_at: timestamp('revoked_at'),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  a2aKeysTenantIdx: index('a2a_api_keys_tenant_id_idx').on(table.tenant_id),
+  a2aKeysHashIdx: index('a2a_api_keys_key_hash_idx').on(table.key_hash),
+}))
+
+// ── External Agents — registry de agentes A2A externos ───────
+
+export const externalAgents = pgTable('external_agents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenant_id: uuid('tenant_id').notNull().references(() => tenants.id),
+  name: text('name').notNull(),
+  url: text('url').notNull(),
+  agent_card: jsonb('agent_card').notNull(),
+  auth_token: text('auth_token'),
+  status: text('status').notNull().default('active'),
+  last_checked_at: timestamp('last_checked_at'),
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  updated_at: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  externalAgentsTenantIdx: index('external_agents_tenant_id_idx').on(table.tenant_id),
+  externalAgentsUnique: uniqueIndex('external_agents_tenant_url_idx').on(table.tenant_id, table.url),
 }))
