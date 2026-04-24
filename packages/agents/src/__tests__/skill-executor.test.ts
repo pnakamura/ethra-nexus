@@ -15,6 +15,8 @@ const mockA2AGetTask = vi.fn()
 
 vi.mock('@ethra-nexus/core', () => ({
   sanitizeForHtml: (content: string) => content, // passthrough para testes
+  sanitizeErrorMessage: (msg: string) => msg,     // passthrough para testes
+  validateExternalUrl: vi.fn().mockResolvedValue(undefined), // SSRF guard — permissive em testes
 }))
 
 vi.mock('../lib/provider', () => ({
@@ -418,7 +420,7 @@ describe('executeSkill — a2a:call', () => {
     }])
   })
 
-  it('sends task and polls until completed when wait_for_result: true', async () => {
+  it('envia task e aguarda conclusão quando wait_for_result é true', async () => {
     mockA2ASendTask.mockResolvedValue({ taskId: 'task-abc' })
     mockA2AGetTask
       .mockResolvedValueOnce({ state: 'working' })
@@ -437,7 +439,7 @@ describe('executeSkill — a2a:call', () => {
     }
   })
 
-  it('returns immediately with taskId when wait_for_result: false', async () => {
+  it('retorna imediatamente com taskId quando wait_for_result é false', async () => {
     mockA2ASendTask.mockResolvedValue({ taskId: 'task-xyz' })
 
     const result = await executeSkill('a2a:call', context, {
@@ -453,7 +455,7 @@ describe('executeSkill — a2a:call', () => {
     }
   })
 
-  it('returns EXTERNAL_AGENT_ERROR when agent not found in DB', async () => {
+  it('retorna EXTERNAL_AGENT_ERROR quando agente não encontrado no DB', async () => {
     mockSelectResult.mockResolvedValue([])
 
     const result = await executeSkill('a2a:call', context, {
@@ -467,7 +469,7 @@ describe('executeSkill — a2a:call', () => {
     }
   })
 
-  it('returns EXTERNAL_AGENT_ERROR when agent status is inactive', async () => {
+  it('retorna EXTERNAL_AGENT_ERROR quando agente está inativo', async () => {
     mockSelectResult.mockResolvedValue([{
       id: 'ext-agent-1',
       name: 'Analytics Agent',
@@ -488,7 +490,7 @@ describe('executeSkill — a2a:call', () => {
     }
   })
 
-  it('returns EXTERNAL_AGENT_ERROR with retryable: true on sendTask failure', async () => {
+  it('retorna EXTERNAL_AGENT_ERROR com retryable: true em falha de sendTask', async () => {
     mockA2ASendTask.mockRejectedValue(new Error('Network timeout'))
 
     const result = await executeSkill('a2a:call', context, {
@@ -501,5 +503,35 @@ describe('executeSkill — a2a:call', () => {
       expect(result.error.code).toBe('EXTERNAL_AGENT_ERROR')
       expect(result.error.retryable).toBe(true)
     }
+  })
+
+  it('retorna INVALID_INPUT quando external_agent_id ou message ausentes', async () => {
+    const result = await executeSkill('a2a:call', context, {}, { system_prompt: '', model: '' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_INPUT')
+    }
+  })
+
+  it('retorna TIMEOUT quando o agente externo não termina em 30 iterações', async () => {
+    mockA2ASendTask.mockResolvedValue({ taskId: 'task-timeout' })
+    mockA2AGetTask.mockResolvedValue({ state: 'working' })
+
+    // Speed up timeouts
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn) => { (fn as () => void)(); return 0 as unknown as ReturnType<typeof setTimeout> })
+
+    const result = await executeSkill('a2a:call', context, {
+      external_agent_id: 'ext-agent-1',
+      message: 'Take forever',
+      wait_for_result: true,
+    }, { system_prompt: '', model: '' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('TIMEOUT')
+      expect(result.error.retryable).toBe(true)
+    }
+    vi.restoreAllMocks()
   })
 })

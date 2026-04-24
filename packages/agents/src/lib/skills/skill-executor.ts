@@ -1,5 +1,5 @@
 import type { SkillId, AgentResult, AgentContext } from '@ethra-nexus/core'
-import { sanitizeForHtml } from '@ethra-nexus/core'
+import { sanitizeForHtml, sanitizeErrorMessage, validateExternalUrl } from '@ethra-nexus/core'
 import { embed, extractPagesFromContent } from '@ethra-nexus/wiki'
 import { createRegistryFromEnv } from '../provider'
 import { createWikiDb } from '../db'
@@ -743,9 +743,9 @@ async function executeA2ACall(
   input: SkillInput,
   ts: string,
 ): Promise<AgentResult<SkillOutput>> {
-  const externalAgentId = input['external_agent_id'] as string | undefined
-  const message = input['message'] as string | undefined
-  const waitForResult = input['wait_for_result'] !== false  // default true
+  const externalAgentId = typeof input['external_agent_id'] === 'string' ? input['external_agent_id'] : ''
+  const message = typeof input['message'] === 'string' ? input['message'] : ''
+  const waitForResult = input['wait_for_result'] !== false  // default true — undefined !== false → true
 
   if (!externalAgentId || !message) {
     return {
@@ -786,6 +786,7 @@ async function executeA2ACall(
   }
 
   try {
+    await validateExternalUrl(extAgent.url)
     const client = new A2AClient(extAgent.url, extAgent.auth_token ?? undefined)
     const { taskId } = await client.sendTask(message, context.session_id)
 
@@ -813,6 +814,7 @@ async function executeA2ACall(
     // Poll until terminal state, max 30 iterations (60s)
     const MAX_POLLS = 30
     const POLL_INTERVAL_MS = 2000
+    let pollCompleted = false
     let lastResult: string | undefined
 
     for (let i = 0; i < MAX_POLLS; i++) {
@@ -827,6 +829,7 @@ async function executeA2ACall(
             timestamp: ts,
           }
         }
+        pollCompleted = true
         lastResult = task.result
         break
       }
@@ -835,7 +838,7 @@ async function executeA2ACall(
       }
     }
 
-    if (lastResult === undefined) {
+    if (!pollCompleted) {
       return {
         ok: false,
         error: { code: 'TIMEOUT', message: 'External agent task timed out after 60s', retryable: true },
@@ -848,7 +851,7 @@ async function executeA2ACall(
     return {
       ok: true,
       data: {
-        answer: lastResult,
+        answer: lastResult ?? '',
         tokens_in: 0,
         tokens_out: 0,
         cost_usd: 0,
@@ -868,7 +871,7 @@ async function executeA2ACall(
       ok: false,
       error: {
         code: 'EXTERNAL_AGENT_ERROR',
-        message: err instanceof Error ? err.message : 'External agent error',
+        message: sanitizeErrorMessage(err instanceof Error ? err.message : 'External agent error'),
         retryable: true,
       },
       agent_id: context.agent_id,
