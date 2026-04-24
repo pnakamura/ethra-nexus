@@ -167,7 +167,7 @@ sleep 5
 for migration in "$INSTALL_DIR/infra/supabase/migrations"/*.sql; do
   echo "  Aplicando: $(basename "$migration")"
   docker compose -f docker-compose.vps.yml exec -T postgres \
-    psql -U postgres -d ethra_nexus -f "/dev/stdin" < "$migration"
+    psql -U postgres -d "ethra-nexus" -f "/dev/stdin" < "$migration"
 done
 
 log "Migrations aplicadas"

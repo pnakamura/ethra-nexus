@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm";         -- fuzzy text search
 CREATE EXTENSION IF NOT EXISTS "pgjwt";           -- JWT verification
 
 -- Schemas
-CREATE SCHEMA IF NOT EXISTS auth;                 -- GoTrue (Auth)
+CREATE SCHEMA IF NOT EXISTS auth;                 -- funções auth.uid() / auth.role() usadas pelas políticas RLS
 CREATE SCHEMA IF NOT EXISTS n8n;                  -- N8N (automação)
 
 -- Roles para RLS
@@ -44,7 +44,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
 
--- Function auth.uid() — simula o que o Supabase GoTrue fornece
+-- Function auth.uid() — lê claim 'sub' do JWT (set pelo Fastify onRequest hook via SET LOCAL)
 CREATE OR REPLACE FUNCTION auth.uid()
 RETURNS uuid
 LANGUAGE sql STABLE

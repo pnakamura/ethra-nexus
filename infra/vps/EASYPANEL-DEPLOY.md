@@ -18,11 +18,11 @@ Copie a connection string (formato: `postgres://user:password@host:5432/dbname`)
 
 ### 1.2 Criar database (se necessário)
 
-Se o banco `ethra_nexus` ainda não existe, crie via terminal do Easypanel:
+Se o banco `ethra-nexus` ainda não existe, crie via terminal do Easypanel:
 
 ```bash
 # No terminal SSH da VPS ou via Easypanel terminal:
-docker exec -it <container-postgres> psql -U postgres -c "CREATE DATABASE ethra_nexus;"
+docker exec -it <container-postgres> psql -U postgres -c "CREATE DATABASE ethra-nexus;"
 ```
 
 ### 1.3 Aplicar migrations
@@ -31,10 +31,10 @@ Copie o conteúdo de `easypanel-setup.sql` e execute no banco:
 
 ```bash
 # Opção A: via psql na VPS
-docker exec -i <container-postgres> psql -U postgres -d ethra_nexus < /path/to/easypanel-setup.sql
+docker exec -i <container-postgres> psql -U postgres -d ethra-nexus < /path/to/easypanel-setup.sql
 
 # Opção B: copie e cole no terminal psql
-docker exec -it <container-postgres> psql -U postgres -d ethra_nexus
+docker exec -it <container-postgres> psql -U postgres -d ethra-nexus
 # Cole o conteúdo do arquivo easypanel-setup.sql
 ```
 
@@ -62,7 +62,7 @@ PORT=3000
 WIKIS_BASE_PATH=/data/wikis
 
 # PostgreSQL (da connection string do Easypanel)
-DATABASE_URL=postgres://USER:PASSWORD@HOSTNAME:5432/ethra_nexus
+DATABASE_URL=postgres://USER:PASSWORD@HOSTNAME:5432/ethra-nexus
 
 # API Keys (substitua pelos valores reais)
 ANTHROPIC_API_KEY=sk-ant-...
@@ -105,7 +105,7 @@ GENERIC_TIMEZONE=America/Sao_Paulo
 DB_TYPE=postgresdb
 DB_POSTGRESDB_HOST=HOSTNAME_DO_POSTGRES
 DB_POSTGRESDB_PORT=5432
-DB_POSTGRESDB_DATABASE=ethra_nexus
+DB_POSTGRESDB_DATABASE=ethra-nexus
 DB_POSTGRESDB_USER=postgres
 DB_POSTGRESDB_PASSWORD=SENHA_DO_POSTGRES
 DB_POSTGRESDB_SCHEMA=n8n
@@ -158,7 +158,7 @@ SB_USER=admin:GERE_SENHA_FORTE
 
 4. **Banco:** Verifique as tabelas:
    ```bash
-   docker exec -it <postgres> psql -U postgres -d ethra_nexus -c "\dt"
+   docker exec -it <postgres> psql -U postgres -d ethra-nexus -c "\dt"
    ```
 
 ---

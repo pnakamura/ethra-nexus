@@ -5,14 +5,16 @@ name: ethra-nexus
 #
 # Consumo estimado:
 #   PostgreSQL + pgvector    ~400MB
-#   PostgREST (REST API)     ~50MB
-#   GoTrue (Auth)            ~80MB
 #   Ethra Nexus API          ~200MB
 #   N8N                      ~350MB
 #   SilverBullet             ~80MB
 #   Nginx                    ~20MB
 #   ─────────────────────────────
-#   TOTAL                    ~1.2GB (sobram ~2.5GB para OS + swap)
+#   TOTAL                    ~1.05GB (sobram ~2.7GB para OS + swap)
+#
+# PostgREST e GoTrue removidos — o backend usa Fastify + Drizzle
+# com conexão direta ao PostgreSQL via DATABASE_URL.
+# Economia: ~192MB RAM (64M PostgREST + 128M GoTrue).
 #
 # Serviços do Supabase OMITIDOS para economizar RAM:
 #   - Supabase Studio (dashboard web) — usar psql ou DBeaver remoto
@@ -31,7 +33,7 @@ services:
       - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ethra_nexus
+      POSTGRES_DB: ethra-nexus
       # Extensões carregadas no init
       POSTGRES_INITDB_ARGS: "--locale=pt_BR.UTF-8"
     volumes:
@@ -57,59 +59,6 @@ services:
         limits:
           memory: 512M
 
-  # ── PostgREST (REST API para o banco) ──────────────────────
-  postgrest:
-    image: postgrest/postgrest:v12.2.3
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3001:3000"
-    environment:
-      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/ethra_nexus
-      PGRST_DB_SCHEMAS: public
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${JWT_SECRET}
-      PGRST_DB_USE_LEGACY_GUCS: "false"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 64M
-
-  # ── GoTrue (Auth — signup, login, JWT) ─────────────────────
-  auth:
-    image: supabase/gotrue:v2.158.1
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:9999:9999"
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: https://${DOMAIN}
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/ethra_nexus?search_path=auth
-      GOTRUE_SITE_URL: https://${DOMAIN}
-      GOTRUE_URI_ALLOW_LIST: ""
-      GOTRUE_DISABLE_SIGNUP: "false"
-      GOTRUE_JWT_SECRET: ${JWT_SECRET}
-      GOTRUE_JWT_EXP: 3600
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
-      GOTRUE_MAILER_AUTOCONFIRM: "true"
-      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
-      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
-      GOTRUE_SMTP_USER: ${SMTP_USER:-}
-      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
-      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM:-noreply@ethranexus.com}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-
   # ── Ethra Nexus API (AIOS Master + Skills) ─────────────────
   api:
     image: ghcr.io/pnakamura/ethra-nexus:${NEXUS_VERSION:-latest}
@@ -120,11 +69,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       WIKIS_BASE_PATH: /data/wikis
-      # Supabase (apontando para PostgreSQL + PostgREST local)
-      SUPABASE_URL: http://postgrest:3000
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/ethra_nexus
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/ethra-nexus
       # AI Providers
       ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_key
       OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_key
@@ -138,8 +83,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      postgrest:
-        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
@@ -172,7 +115,7 @@ services:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: "5432"
-      DB_POSTGRESDB_DATABASE: ethra_nexus
+      DB_POSTGRESDB_DATABASE: ethra-nexus
       DB_POSTGRESDB_USER: postgres
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_POSTGRESDB_SCHEMA: n8n
@@ -216,8 +159,6 @@ services:
       - api
       - n8n
       - silverbullet
-      - postgrest
-      - auth
     deploy:
       resources:
         limits:
