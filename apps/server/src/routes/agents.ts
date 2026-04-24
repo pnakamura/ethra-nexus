@@ -364,6 +364,111 @@ export async function agentRoutes(app: FastifyInstance) {
     return reply.status(204).send()
   })
 
+  // GET /agents/:id/budget — status de orçamento do mês atual
+  app.get<{ Params: { id: string } }>('/agents/:id/budget', async (request, reply) => {
+    try {
+      validateUUID(request.params.id, 'id')
+    } catch {
+      return reply.status(400).send({ error: 'Invalid agent id format' })
+    }
+
+    const db = getDb()
+    const agentId = request.params.id
+
+    const agentRows = await db
+      .select({ id: agents.id, budget_monthly: agents.budget_monthly, status: agents.status })
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
+      .limit(1)
+
+    const agent = agentRows[0]
+    if (!agent || agent.status === 'archived') {
+      return reply.status(404).send({ error: 'Agent not found' })
+    }
+
+    const month = new Date().toISOString().slice(0, 7)
+    const [budget, alertsFired] = await Promise.all([
+      agentsDb.getBudget(agentId, month),
+      agentsDb.getBudgetAlertsFired(agentId, month),
+    ])
+
+    const limitUsd = Number(agent.budget_monthly)
+    const spentUsd = budget ? Number(budget.spent_usd) : 0
+    const tokensUsed = budget?.tokens_used ?? 0
+    const percentUsed = limitUsd > 0 ? Math.min(100, (spentUsd / limitUsd) * 100) : 0
+
+    return {
+      data: {
+        month,
+        limit_usd: limitUsd,
+        spent_usd: spentUsd,
+        tokens_used: tokensUsed,
+        percent_used: Math.round(percentUsed * 100) / 100,
+        throttled_at: budget?.throttled_at ?? null,
+        alerts_fired: alertsFired,
+      },
+    }
+  })
+
+  // PATCH /agents/:id/budget — atualiza limite mensal de orçamento
+  app.patch<{
+    Params: { id: string }
+    Body: { monthly_limit_usd: number }
+  }>('/agents/:id/budget', async (request, reply) => {
+    try {
+      validateUUID(request.params.id, 'id')
+    } catch {
+      return reply.status(400).send({ error: 'Invalid agent id format' })
+    }
+
+    const { monthly_limit_usd } = request.body
+    if (monthly_limit_usd === undefined || monthly_limit_usd === null) {
+      return reply.status(400).send({ error: 'monthly_limit_usd is required' })
+    }
+    if (typeof monthly_limit_usd !== 'number' || !isFinite(monthly_limit_usd) || monthly_limit_usd < 0) {
+      return reply.status(400).send({ error: 'monthly_limit_usd must be a non-negative number' })
+    }
+
+    const db = getDb()
+    const agentId = request.params.id
+
+    const existing = await db
+      .select({ id: agents.id, status: agents.status })
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
+      .limit(1)
+
+    if (!existing[0] || existing[0].status === 'archived') {
+      return reply.status(404).send({ error: 'Agent not found' })
+    }
+
+    await db.update(agents)
+      .set({ budget_monthly: monthly_limit_usd.toFixed(2), updated_at: new Date() })
+      .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
+
+    const month = new Date().toISOString().slice(0, 7)
+    const [budget, alertsFired] = await Promise.all([
+      agentsDb.getBudget(agentId, month),
+      agentsDb.getBudgetAlertsFired(agentId, month),
+    ])
+
+    const spentUsd = budget ? Number(budget.spent_usd) : 0
+    const tokensUsed = budget?.tokens_used ?? 0
+    const percentUsed = monthly_limit_usd > 0 ? Math.min(100, (spentUsd / monthly_limit_usd) * 100) : 0
+
+    return {
+      data: {
+        month,
+        limit_usd: monthly_limit_usd,
+        spent_usd: spentUsd,
+        tokens_used: tokensUsed,
+        percent_used: Math.round(percentUsed * 100) / 100,
+        throttled_at: budget?.throttled_at ?? null,
+        alerts_fired: alertsFired,
+      },
+    }
+  })
+
   // POST /agents/:id/ask — pergunta ao agente (delega ao AIOS Master)
   app.post<{
     Params: { id: string }
