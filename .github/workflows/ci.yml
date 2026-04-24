@@ -72,6 +72,63 @@ jobs:
           fi
           echo "OK: Nenhuma chave detectada"
 
+  e2e:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [ci]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ethra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ethra_test
+      DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/ethra_test
+      JWT_SECRET: ci-test-secret-not-for-production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Setup test database
+        env:
+          PGPASSWORD: postgres
+        run: |
+          grep -v "pgjwt" infra/vps/init-db.sql > /tmp/init-ci.sql
+          psql -h localhost -U postgres -d ethra_test -f /tmp/init-ci.sql
+          for f in $(ls infra/supabase/migrations/*.sql | sort); do
+            echo "→ $(basename $f)"
+            psql -h localhost -U postgres -d ethra_test -f "$f"
+          done
+
+      - name: Run E2E tests
+        run: cd apps/server && npx vitest run --reporter=verbose
+
   docker:
     name: Docker build & push
     runs-on: ubuntu-latest
