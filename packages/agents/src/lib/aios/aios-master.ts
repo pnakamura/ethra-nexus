@@ -12,7 +12,7 @@ export interface AiosTaskRequest {
   agent_id: string
   skill_id: SkillId
   input: SkillInput
-  activation_mode?: 'on_demand' | 'scheduled' | 'event'
+  activation_mode?: 'on_demand' | 'scheduled' | 'event' | 'a2a'
   activation_source?: string     // canal de origem: 'api', 'whatsapp', schedule_id, etc.
   triggered_by?: string | null   // JWT userId string, 'system', ou null
   user_ip?: string | null

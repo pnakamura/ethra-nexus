@@ -7,6 +7,12 @@ import { extractPagesFromContent } from '@ethra-nexus/wiki'  // mocked below —
 const mockComplete = vi.fn()
 const mockUpsertStrategicPage = vi.fn()
 
+// Mock para a2a:call — selectResult controla o retorno do DB select chain
+const mockSelectResult = vi.fn()
+
+const mockA2ASendTask = vi.fn()
+const mockA2AGetTask = vi.fn()
+
 vi.mock('@ethra-nexus/core', () => ({
   sanitizeForHtml: (content: string) => content, // passthrough para testes
 }))
@@ -26,15 +32,34 @@ vi.mock('../lib/db', () => ({
   })),
 }))
 
+vi.mock('../lib/a2a/client', () => ({
+  A2AClient: vi.fn().mockImplementation(() => ({
+    sendTask: mockA2ASendTask,
+    getTask: mockA2AGetTask,
+  })),
+}))
+
 vi.mock('@ethra-nexus/db', () => ({
   getDb: () => ({
     execute: vi.fn().mockResolvedValue({ rows: [{ count: '0' }] }),
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: mockSelectResult,
+        }),
+      }),
+    }),
   }),
+  externalAgents: {},
+  eq: vi.fn(),
+  and: vi.fn(),
 }))
 
-// skill-executor imports sql from drizzle-orm directly
+// skill-executor imports sql, eq, and from drizzle-orm directly
 vi.mock('drizzle-orm', () => ({
   sql: vi.fn().mockReturnValue(''),
+  eq: vi.fn(),
+  and: vi.fn(),
 }))
 
 const mockEmitEvent = vi.fn().mockResolvedValue(undefined)
@@ -48,6 +73,11 @@ const { executeSkill } = await import('../lib/skills/skill-executor')
 const context: AgentContext = {
   tenant_id: 'tenant-1',
   agent_id: 'agent-1',
+  session_id: 'session-test-1',
+  wiki_scope: 'tenant-1',
+  timestamp: new Date().toISOString(),
+  budget_remaining_usd: 10,
+  tokens_remaining: 100000,
 }
 
 const agent = {
@@ -371,6 +401,105 @@ describe('executeSkill — dispatcher', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.error.code).toBe('SKILL_NOT_FOUND')
+    }
+  })
+})
+
+describe('executeSkill — a2a:call', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Default: external agent found and active
+    mockSelectResult.mockResolvedValue([{
+      id: 'ext-agent-1',
+      name: 'Analytics Agent',
+      url: 'https://analytics.example.com/a2a',
+      auth_token: 'token-xyz',
+      status: 'active',
+    }])
+  })
+
+  it('sends task and polls until completed when wait_for_result: true', async () => {
+    mockA2ASendTask.mockResolvedValue({ taskId: 'task-abc' })
+    mockA2AGetTask
+      .mockResolvedValueOnce({ state: 'working' })
+      .mockResolvedValueOnce({ state: 'completed', result: 'Analysis done!' })
+
+    const result = await executeSkill('a2a:call', context, {
+      external_agent_id: 'ext-agent-1',
+      message: 'Analyze Q1',
+      wait_for_result: true,
+    }, { system_prompt: '', model: '' })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.data.answer).toBe('Analysis done!')
+      expect(result.data.external_task_id).toBe('task-abc')
+    }
+  })
+
+  it('returns immediately with taskId when wait_for_result: false', async () => {
+    mockA2ASendTask.mockResolvedValue({ taskId: 'task-xyz' })
+
+    const result = await executeSkill('a2a:call', context, {
+      external_agent_id: 'ext-agent-1',
+      message: 'Fire and forget',
+      wait_for_result: false,
+    }, { system_prompt: '', model: '' })
+
+    expect(result.ok).toBe(true)
+    expect(mockA2AGetTask).not.toHaveBeenCalled()
+    if (result.ok) {
+      expect(result.data.external_task_id).toBe('task-xyz')
+    }
+  })
+
+  it('returns EXTERNAL_AGENT_ERROR when agent not found in DB', async () => {
+    mockSelectResult.mockResolvedValue([])
+
+    const result = await executeSkill('a2a:call', context, {
+      external_agent_id: 'nonexistent',
+      message: 'Hello',
+    }, { system_prompt: '', model: '' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('EXTERNAL_AGENT_ERROR')
+    }
+  })
+
+  it('returns EXTERNAL_AGENT_ERROR when agent status is inactive', async () => {
+    mockSelectResult.mockResolvedValue([{
+      id: 'ext-agent-1',
+      name: 'Analytics Agent',
+      url: 'https://analytics.example.com/a2a',
+      auth_token: null,
+      status: 'inactive',
+    }])
+
+    const result = await executeSkill('a2a:call', context, {
+      external_agent_id: 'ext-agent-1',
+      message: 'Hello',
+    }, { system_prompt: '', model: '' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('EXTERNAL_AGENT_ERROR')
+      expect(result.error.retryable).toBe(false)
+    }
+  })
+
+  it('returns EXTERNAL_AGENT_ERROR with retryable: true on sendTask failure', async () => {
+    mockA2ASendTask.mockRejectedValue(new Error('Network timeout'))
+
+    const result = await executeSkill('a2a:call', context, {
+      external_agent_id: 'ext-agent-1',
+      message: 'Hello',
+    }, { system_prompt: '', model: '' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('EXTERNAL_AGENT_ERROR')
+      expect(result.error.retryable).toBe(true)
     }
   })
 })

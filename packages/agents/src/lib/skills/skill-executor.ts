@@ -3,9 +3,10 @@ import { sanitizeForHtml } from '@ethra-nexus/core'
 import { embed, extractPagesFromContent } from '@ethra-nexus/wiki'
 import { createRegistryFromEnv } from '../provider'
 import { createWikiDb } from '../db'
-import { getDb } from '@ethra-nexus/db'
-import { sql } from 'drizzle-orm'
+import { getDb, externalAgents } from '@ethra-nexus/db'
+import { sql, eq, and } from 'drizzle-orm'
 import { emitEvent } from '../scheduler/event-bus'
+import { A2AClient } from '../a2a/client'
 
 export interface SkillInput {
   question?: string
@@ -23,6 +24,7 @@ export interface SkillOutput {
   provider: string
   model: string
   is_fallback: boolean
+  external_task_id?: string  // set by a2a:call
 }
 
 // Dispatcher principal: mapeia SkillId → handler
@@ -70,6 +72,10 @@ export async function executeSkill(
 
   if (skill_id === 'data:extract') {
     return executeDataExtract(skill_id, context, input, ts)
+  }
+
+  if (skill_id === 'a2a:call') {
+    return executeA2ACall(skill_id, context, input, ts)
   }
 
   return {
@@ -728,5 +734,146 @@ async function executeDataExtract(
     timestamp: ts,
     tokens_used: totalTokens,
     cost_usd: costUsd,
+  }
+}
+
+async function executeA2ACall(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  const externalAgentId = input['external_agent_id'] as string | undefined
+  const message = input['message'] as string | undefined
+  const waitForResult = input['wait_for_result'] !== false  // default true
+
+  if (!externalAgentId || !message) {
+    return {
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'external_agent_id and message are required', retryable: false },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(externalAgents)
+    .where(and(eq(externalAgents.id, externalAgentId), eq(externalAgents.tenant_id, context.tenant_id)))
+    .limit(1)
+
+  const extAgent = rows[0]
+  if (!extAgent) {
+    return {
+      ok: false,
+      error: { code: 'EXTERNAL_AGENT_ERROR', message: 'External agent not found', retryable: false },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  if (extAgent.status !== 'active') {
+    return {
+      ok: false,
+      error: { code: 'EXTERNAL_AGENT_ERROR', message: `External agent is ${extAgent.status}`, retryable: false },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
+  }
+
+  try {
+    const client = new A2AClient(extAgent.url, extAgent.auth_token ?? undefined)
+    const { taskId } = await client.sendTask(message, context.session_id)
+
+    if (!waitForResult) {
+      return {
+        ok: true,
+        data: {
+          answer: `Task submitted to external agent. Task ID: ${taskId}`,
+          tokens_in: 0,
+          tokens_out: 0,
+          cost_usd: 0,
+          provider: 'external',
+          model: extAgent.name,
+          is_fallback: false,
+          external_task_id: taskId,
+        },
+        agent_id: context.agent_id,
+        skill_id,
+        timestamp: ts,
+        tokens_used: 0,
+        cost_usd: 0,
+      }
+    }
+
+    // Poll until terminal state, max 30 iterations (60s)
+    const MAX_POLLS = 30
+    const POLL_INTERVAL_MS = 2000
+    let lastResult: string | undefined
+
+    for (let i = 0; i < MAX_POLLS; i++) {
+      const task = await client.getTask(taskId)
+      if (task.state === 'completed' || task.state === 'failed' || task.state === 'canceled') {
+        if (task.state !== 'completed') {
+          return {
+            ok: false,
+            error: { code: 'EXTERNAL_AGENT_ERROR', message: `External task ${task.state}`, retryable: task.state !== 'canceled' },
+            agent_id: context.agent_id,
+            skill_id,
+            timestamp: ts,
+          }
+        }
+        lastResult = task.result
+        break
+      }
+      if (i < MAX_POLLS - 1) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+      }
+    }
+
+    if (lastResult === undefined) {
+      return {
+        ok: false,
+        error: { code: 'TIMEOUT', message: 'External agent task timed out after 60s', retryable: true },
+        agent_id: context.agent_id,
+        skill_id,
+        timestamp: ts,
+      }
+    }
+
+    return {
+      ok: true,
+      data: {
+        answer: lastResult,
+        tokens_in: 0,
+        tokens_out: 0,
+        cost_usd: 0,
+        provider: 'external',
+        model: extAgent.name,
+        is_fallback: false,
+        external_task_id: taskId,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+      tokens_used: 0,
+      cost_usd: 0,
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        code: 'EXTERNAL_AGENT_ERROR',
+        message: err instanceof Error ? err.message : 'External agent error',
+        retryable: true,
+      },
+      agent_id: context.agent_id,
+      skill_id,
+      timestamp: ts,
+    }
   }
 }
