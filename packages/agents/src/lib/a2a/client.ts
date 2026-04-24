@@ -47,9 +47,12 @@ export class A2AClient {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     })
+    if (!res.ok) throw new Error(`A2A request failed: ${res.status}`)
     const data = await res.json() as {
       result?: { status: { state: string }; result?: string }
+      error?: { message: string }
     }
+    if (data.error) throw new Error(`A2A error: ${data.error.message}`)
     return {
       state: data.result?.status.state ?? 'unknown',
       result: data.result?.result,
