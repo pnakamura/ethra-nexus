@@ -44,3 +44,8 @@ export type { BusEventType, QueuedEvent } from './lib/scheduler/event-bus'
 export { validateCron, calcNextRun } from './lib/scheduler/cron-utils'
 export { dispatchOutput } from './lib/scheduler/output-dispatcher'
 export type { DispatchSource } from './lib/scheduler/output-dispatcher'
+
+// A2A Protocol
+export { A2AClient } from './lib/a2a/client'
+export { AgentCardSchema } from './lib/a2a/schemas'
+export type { ValidatedAgentCard } from './lib/a2a/schemas'
