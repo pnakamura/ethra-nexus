@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { eq, and, desc } from 'drizzle-orm'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { getDb, agents, agentSkills, a2aApiKeys, externalAgents, aiosEvents, tenants } from '@ethra-nexus/db'
-import { validateExternalUrl, SecurityValidationError } from '@ethra-nexus/core'
+import { validateExternalUrl, SecurityValidationError, sanitizeErrorMessage, validateUUID } from '@ethra-nexus/core'
 import { AgentCardSchema, executeTask } from '@ethra-nexus/agents'
 
 declare module 'fastify' {
@@ -47,6 +47,7 @@ export async function a2aManagementRoutes(app: FastifyInstance) {
     if (!name || !agent_id) {
       return reply.status(400).send({ error: 'name and agent_id are required' })
     }
+    try { validateUUID(agent_id, 'agent_id') } catch { return reply.status(400).send({ error: 'Invalid agent_id format' }) }
 
     // Verify agent belongs to tenant
     const agentRows = await db
@@ -59,6 +60,18 @@ export async function a2aManagementRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: 'Agent not found' })
     }
 
+    let expiresAtDate: Date | null = null
+    if (expires_at !== undefined) {
+      const d = new Date(expires_at)
+      if (isNaN(d.getTime())) {
+        return reply.status(400).send({ error: 'expires_at must be a valid ISO 8601 date' })
+      }
+      if (d <= new Date()) {
+        return reply.status(400).send({ error: 'expires_at must be a future date' })
+      }
+      expiresAtDate = d
+    }
+
     const { key, prefix, hash } = generateApiKey()
     await db.insert(a2aApiKeys).values({
       tenant_id: request.tenantId,
@@ -66,7 +79,7 @@ export async function a2aManagementRoutes(app: FastifyInstance) {
       name,
       key_hash: hash,
       key_prefix: prefix,
-      expires_at: expires_at !== undefined ? new Date(expires_at) : null,
+      expires_at: expiresAtDate,
     })
 
     // Return raw key once — never stored again
@@ -93,6 +106,7 @@ export async function a2aManagementRoutes(app: FastifyInstance) {
 
   // DELETE /a2a/keys/:id — revoga API key
   app.delete<{ Params: { id: string } }>('/a2a/keys/:id', async (request, reply) => {
+    try { validateUUID(request.params.id, 'id') } catch { return reply.status(400).send({ error: 'Invalid id format' }) }
     const rows = await db
       .select({ id: a2aApiKeys.id })
       .from(a2aApiKeys)
@@ -206,8 +220,18 @@ export async function a2aManagementRoutes(app: FastifyInstance) {
 
   // GET /a2a/agents/:id — detalhe de agente externo
   app.get<{ Params: { id: string } }>('/a2a/agents/:id', async (request, reply) => {
+    try { validateUUID(request.params.id, 'id') } catch { return reply.status(400).send({ error: 'Invalid id format' }) }
     const rows = await db
-      .select()
+      .select({
+        id: externalAgents.id,
+        name: externalAgents.name,
+        url: externalAgents.url,
+        status: externalAgents.status,
+        agent_card: externalAgents.agent_card,
+        last_checked_at: externalAgents.last_checked_at,
+        created_at: externalAgents.created_at,
+        updated_at: externalAgents.updated_at,
+      })
       .from(externalAgents)
       .where(and(eq(externalAgents.id, request.params.id), eq(externalAgents.tenant_id, request.tenantId)))
       .limit(1)
@@ -220,6 +244,7 @@ export async function a2aManagementRoutes(app: FastifyInstance) {
 
   // DELETE /a2a/agents/:id — remove agente externo
   app.delete<{ Params: { id: string } }>('/a2a/agents/:id', async (request, reply) => {
+    try { validateUUID(request.params.id, 'id') } catch { return reply.status(400).send({ error: 'Invalid id format' }) }
     const rows = await db
       .select({ id: externalAgents.id })
       .from(externalAgents)
@@ -337,7 +362,7 @@ export async function a2aProtocolRoutes(app: FastifyInstance) {
         return reply.send({
           jsonrpc: '2.0',
           id: rpcId,
-          error: { code: -32603, message: result.error.message },
+          error: { code: -32603, message: sanitizeErrorMessage(result.error.message) },
         })
       }
 
