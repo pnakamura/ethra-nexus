@@ -16,6 +16,7 @@ import { eventSubscriptionsRoutes } from './routes/event-subscriptions'
 import { webhookRoutes } from './routes/webhooks'
 import { agentSkillsRoutes } from './routes/agent-skills'
 import { agentChannelsRoutes } from './routes/agent-channels'
+import { a2aManagementRoutes, a2aProtocolRoutes, a2aPublicRoutes } from './routes/a2a'
 import { startSchedulerLoop } from '@ethra-nexus/agents'
 
 // ============================================================
@@ -59,7 +60,7 @@ export async function buildApp() {
   // ── Global hook: JWT + tenant isolation ──────────────────
   app.addHook('onRequest', async (request, reply) => {
     // Skip auth for public routes
-    const publicPaths = ['/api/v1/health', '/api/v1/auth/login', '/api/v1/webhooks']
+    const publicPaths = ['/api/v1/health', '/api/v1/auth/login', '/api/v1/webhooks', '/.well-known', '/api/v1/a2a']
     if (publicPaths.some((p) => request.url.startsWith(p))) {
       return
     }
@@ -85,6 +86,9 @@ export async function buildApp() {
   await app.register(webhookRoutes, { prefix: '/api/v1' })
   await app.register(agentSkillsRoutes, { prefix: '/api/v1' })
   await app.register(agentChannelsRoutes, { prefix: '/api/v1' })
+  await app.register(a2aPublicRoutes)
+  await app.register(a2aManagementRoutes, { prefix: '/api/v1' })
+  await app.register(a2aProtocolRoutes, { prefix: '/api/v1' })
 
   startSchedulerLoop()
 
