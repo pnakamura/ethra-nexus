@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, desc } from 'drizzle-orm'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { getDb, agents, agentSkills, a2aApiKeys, externalAgents, aiosEvents, tenants } from '@ethra-nexus/db'
 import { validateExternalUrl, SecurityValidationError } from '@ethra-nexus/core'
@@ -270,11 +270,6 @@ export async function a2aProtocolRoutes(app: FastifyInstance) {
     const rawKey = authHeader.slice(7)
     const keyHash = hashApiKey(rawKey)
 
-    // Rate limit by key
-    if (!checkRateLimit(rateLimitByKeyHash, keyHash, 100, 60_000)) {
-      return reply.status(429).send({ error: 'Rate limit exceeded', retryAfter: 60 })
-    }
-
     // Lookup API key
     const keyRows = await db
       .select({
@@ -294,6 +289,11 @@ export async function a2aProtocolRoutes(app: FastifyInstance) {
     }
     if (apiKey.expires_at !== null && apiKey.expires_at < new Date()) {
       return reply.status(401).send({ error: 'API key expired' })
+    }
+
+    // Rate limit by key (after key is confirmed valid)
+    if (!checkRateLimit(rateLimitByKeyHash, keyHash, 100, 60_000)) {
+      return reply.status(429).send({ error: 'Rate limit exceeded', retryAfter: 60 })
     }
 
     // Rate limit by tenant
@@ -352,6 +352,7 @@ export async function a2aProtocolRoutes(app: FastifyInstance) {
             eq(aiosEvents.activation_mode, 'a2a'),
           ),
         )
+        .orderBy(desc(aiosEvents.started_at))
         .limit(1)
 
       const taskId = events[0]?.id ?? randomUUID()
@@ -411,10 +412,20 @@ export async function a2aProtocolRoutes(app: FastifyInstance) {
         return reply.send({ jsonrpc: '2.0', id: rpcId, error: { code: -32602, message: 'id required' } })
       }
 
+      const taskRows = await db
+        .select({ id: aiosEvents.id })
+        .from(aiosEvents)
+        .where(and(eq(aiosEvents.id, taskId), eq(aiosEvents.tenant_id, request.tenantId)))
+        .limit(1)
+
+      if (!taskRows[0]) {
+        return reply.send({ jsonrpc: '2.0', id: rpcId, error: { code: -32602, message: 'Task not found' } })
+      }
+
       await db
         .update(aiosEvents)
         .set({ status: 'canceled' })
-        .where(and(eq(aiosEvents.id, taskId), eq(aiosEvents.tenant_id, request.tenantId)))
+        .where(eq(aiosEvents.id, taskId))
 
       return reply.send({
         jsonrpc: '2.0',
