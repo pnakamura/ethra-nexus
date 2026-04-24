@@ -349,6 +349,21 @@ export async function a2aProtocolRoutes(app: FastifyInstance) {
       const message = messageParts?.parts?.[0]?.text ?? ''
       const contextId = params['contextId'] as string | undefined
 
+      // Verify the agent is still active with a2a_enabled
+      const agentCheck = await db
+        .select({ a2a_enabled: agents.a2a_enabled, status: agents.status })
+        .from(agents)
+        .where(and(eq(agents.id, request.a2aAgentId!), eq(agents.tenant_id, request.tenantId)))
+        .limit(1)
+
+      if (!agentCheck[0] || !agentCheck[0].a2a_enabled || agentCheck[0].status !== 'active') {
+        return reply.send({
+          jsonrpc: '2.0',
+          id: rpcId,
+          error: { code: -32603, message: 'Agent is not available for A2A requests' },
+        })
+      }
+
       const result = await executeTask({
         tenant_id: request.tenantId,
         agent_id: request.a2aAgentId!,

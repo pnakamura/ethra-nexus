@@ -261,6 +261,7 @@ export const externalAgents = pgTable('external_agents', {
   name: text('name').notNull(),
   url: text('url').notNull(),
   agent_card: jsonb('agent_card').notNull(),
+  // auth_token stored in plaintext — TODO: encrypt at rest in a future migration
   auth_token: text('auth_token'),
   status: text('status').notNull().default('active'),
   last_checked_at: timestamp('last_checked_at'),

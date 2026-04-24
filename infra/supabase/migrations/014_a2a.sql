@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS external_agents (
   name           TEXT        NOT NULL,
   url            TEXT        NOT NULL,
   agent_card     JSONB       NOT NULL,
-  auth_token     TEXT,
+  auth_token     TEXT,               -- stored plaintext; encrypt at rest in future migration
   status         TEXT        NOT NULL DEFAULT 'active',
   last_checked_at TIMESTAMPTZ,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
