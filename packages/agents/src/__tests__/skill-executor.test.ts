@@ -4,14 +4,19 @@ import type { AgentContext } from '@ethra-nexus/core'
 import type { ExtractResult } from '@ethra-nexus/wiki'
 import { extractPagesFromContent } from '@ethra-nexus/wiki'  // mocked below — hoisting garante que é o mock
 
-const mockComplete = vi.fn()
-const mockUpsertStrategicPage = vi.fn()
-
-// Mock para a2a:call — selectResult controla o retorno do DB select chain
-const mockSelectResult = vi.fn()
-
-const mockA2ASendTask = vi.fn()
-const mockA2AGetTask = vi.fn()
+// vi.hoisted: variables used inside vi.mock factories must be declared with vi.hoisted
+// to ensure they are available when the factory is invoked (which happens before module-level vars)
+const { mockComplete, mockUpsertStrategicPage, mockSelectResult, mockA2ASendTask, mockA2AGetTask,
+        mockEmitEvent, mockEmbed, mockWriteLesson } = vi.hoisted(() => ({
+  mockComplete: vi.fn(),
+  mockUpsertStrategicPage: vi.fn(),
+  mockSelectResult: vi.fn(),
+  mockA2ASendTask: vi.fn(),
+  mockA2AGetTask: vi.fn(),
+  mockEmitEvent: vi.fn().mockResolvedValue(undefined),
+  mockEmbed: vi.fn().mockResolvedValue(Array(1536).fill(0.1)),
+  mockWriteLesson: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('@ethra-nexus/core', () => ({
   sanitizeForHtml: (content: string) => content, // passthrough para testes
@@ -24,7 +29,7 @@ vi.mock('../lib/provider', () => ({
 }))
 
 vi.mock('@ethra-nexus/wiki', () => ({
-  embed: vi.fn().mockResolvedValue(Array(1536).fill(0.1)),
+  embed: mockEmbed,
   extractPagesFromContent: vi.fn(),
 }))
 
@@ -64,10 +69,12 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn(),
 }))
 
-const mockEmitEvent = vi.fn().mockResolvedValue(undefined)
-
 vi.mock('../lib/scheduler/event-bus', () => ({
   emitEvent: mockEmitEvent,
+}))
+
+vi.mock('../lib/wiki/wiki-writer', () => ({
+  writeLesson: mockWriteLesson,
 }))
 
 const { executeSkill } = await import('../lib/skills/skill-executor')
@@ -75,16 +82,20 @@ const { executeSkill } = await import('../lib/skills/skill-executor')
 const context: AgentContext = {
   tenant_id: 'tenant-1',
   agent_id: 'agent-1',
-  session_id: 'session-test-1',
-  wiki_scope: 'tenant-1',
-  timestamp: new Date().toISOString(),
-  budget_remaining_usd: 10,
-  tokens_remaining: 100000,
+  session_id: 'event-uuid-test',
+  wiki_scope: 'agent-test',
+  timestamp: '2026-01-01T00:00:00.000Z',
+  budget_remaining_usd: 50,
+  tokens_remaining: 0,
 }
 
 const agent = {
   system_prompt: 'Você é um assistente de teste.',
   model: 'claude-sonnet-4-6',
+  wiki_enabled: true,
+  wiki_top_k: 5,
+  wiki_min_score: 0.72,
+  wiki_write_mode: 'supervised' as const,
 }
 
 const mockResponse = {
@@ -101,6 +112,7 @@ describe('executeSkill — dispatcher', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockComplete.mockResolvedValue(mockResponse)
+    mockWriteLesson.mockResolvedValue(undefined)
   })
 
   it('wiki:query → executa executeWikiQuery e retorna ok:true', async () => {
@@ -404,6 +416,35 @@ describe('executeSkill — dispatcher', () => {
     if (!result.ok) {
       expect(result.error.code).toBe('SKILL_NOT_FOUND')
     }
+  })
+
+  it('wiki:query com wiki_enabled=false — não chama embed', async () => {
+    const result = await executeSkill(
+      'wiki:query',
+      context,
+      { question: 'O que é X?' },
+      { ...agent, wiki_enabled: false },
+    )
+    expect(result.ok).toBe(true)
+    expect(mockEmbed).not.toHaveBeenCalled()
+  })
+
+  it('wiki:query com wiki_enabled=true — chama WikiWriter após execução', async () => {
+    await executeSkill('wiki:query', context, { question: 'Qual é a política de X?' }, agent)
+    expect(mockWriteLesson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent_id: 'agent-1',
+        tenant_id: 'tenant-1',
+        aios_event_id: 'event-uuid-test',
+        write_mode: 'supervised',
+      }),
+    )
+  })
+
+  it('wiki:query — falha silenciosa do WikiWriter não afeta resultado', async () => {
+    mockWriteLesson.mockRejectedValue(new Error('DB down'))
+    const result = await executeSkill('wiki:query', context, { question: 'Teste' }, agent)
+    expect(result.ok).toBe(true)
   })
 })
 

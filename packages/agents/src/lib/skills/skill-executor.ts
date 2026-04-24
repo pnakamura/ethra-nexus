@@ -7,6 +7,7 @@ import { getDb, externalAgents } from '@ethra-nexus/db'
 import { sql, eq, and } from 'drizzle-orm'
 import { emitEvent } from '../scheduler/event-bus'
 import { A2AClient } from '../a2a/client'
+import { writeLesson } from '../wiki/wiki-writer'
 
 export interface SkillInput {
   question?: string
@@ -34,7 +35,14 @@ export async function executeSkill(
   skill_id: SkillId,
   context: AgentContext,
   input: SkillInput,
-  agent: { system_prompt: string; model: string },
+  agent: {
+    system_prompt: string
+    model: string
+    wiki_enabled?: boolean
+    wiki_top_k?: number
+    wiki_min_score?: number
+    wiki_write_mode?: 'manual' | 'supervised' | 'auto'
+  },
 ): Promise<AgentResult<SkillOutput>> {
   const ts = new Date().toISOString()
 
@@ -95,54 +103,68 @@ async function executeWikiQuery(
   skill_id: SkillId,
   context: AgentContext,
   input: SkillInput,
-  agent: { system_prompt: string; model: string },
+  agent: {
+    system_prompt: string
+    model: string
+    wiki_enabled?: boolean
+    wiki_top_k?: number
+    wiki_min_score?: number
+    wiki_write_mode?: 'manual' | 'supervised' | 'auto'
+  },
   ts: string,
 ): Promise<AgentResult<SkillOutput>> {
   const question = input.question ?? input.message ?? ''
   const db = getDb()
 
+  const wikiEnabled = agent.wiki_enabled ?? true
+  const wikiTopK = agent.wiki_top_k ?? 5
+  const wikiMinScore = agent.wiki_min_score ?? 0.72
+  const wikiWriteMode = agent.wiki_write_mode ?? 'supervised'
+
   // Busca semântica na wiki — non-fatal se falhar
   // Combina System Wiki (wiki_strategic_pages) + Agent Wiki (wiki_agent_pages)
   let wikiContext = ''
-  try {
-    const embedding = await embed(question)
-    const vectorStr = `[${embedding.join(',')}]`
+  if (wikiEnabled) {
+    try {
+      const embedding = await embed(question)
+      const vectorStr = `[${embedding.join(',')}]`
 
-    const [systemRows, agentRows] = await Promise.all([
-      db.execute(
-        sql`SELECT title, content, 1 - (embedding <=> ${vectorStr}::vector) AS similarity
-            FROM wiki_strategic_pages
-            WHERE tenant_id = ${context.tenant_id}
-              AND status = 'ativo'
-              AND embedding IS NOT NULL
-            ORDER BY embedding <=> ${vectorStr}::vector
-            LIMIT 5`,
-      ),
-      db.execute(
-        sql`SELECT title, content, 1 - (embedding <=> ${vectorStr}::vector) AS similarity
-            FROM wiki_agent_pages
-            WHERE agent_id = ${context.agent_id}
-              AND status = 'ativo'
-              AND embedding IS NOT NULL
-            ORDER BY embedding <=> ${vectorStr}::vector
-            LIMIT 5`,
-      ),
-    ])
+      const [systemRows, agentRows] = await Promise.all([
+        db.execute(
+          sql`SELECT title, content, 1 - (embedding <=> ${vectorStr}::vector) AS similarity
+              FROM wiki_strategic_pages
+              WHERE tenant_id = ${context.tenant_id}
+                AND status = 'ativo'
+                AND embedding IS NOT NULL
+              ORDER BY embedding <=> ${vectorStr}::vector
+              LIMIT ${wikiTopK}`,
+        ),
+        db.execute(
+          sql`SELECT title, content, 1 - (embedding <=> ${vectorStr}::vector) AS similarity
+              FROM wiki_agent_pages
+              WHERE agent_id = ${context.agent_id}
+                AND status = 'ativo'
+                AND embedding IS NOT NULL
+              ORDER BY embedding <=> ${vectorStr}::vector
+              LIMIT ${wikiTopK}`,
+        ),
+      ])
 
-    type WikiRow = { title: string; content: string; similarity: number }
-    const combined = [
-      ...(systemRows.rows as WikiRow[]),
-      ...(agentRows.rows as WikiRow[]),
-    ]
-      .filter((r) => r.similarity > 0.3)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 3)
+      type WikiRow = { title: string; content: string; similarity: number }
+      const combined = [
+        ...(systemRows.rows as WikiRow[]),
+        ...(agentRows.rows as WikiRow[]),
+      ]
+        .filter((r) => r.similarity > wikiMinScore)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, wikiTopK)
 
-    if (combined.length > 0) {
-      wikiContext = combined.map((p) => `## ${p.title}\n${p.content}`).join('\n\n---\n\n')
+      if (combined.length > 0) {
+        wikiContext = combined.map((p) => `## ${p.title}\n${p.content}`).join('\n\n---\n\n')
+      }
+    } catch {
+      // wiki search failure é non-fatal: responde sem contexto
     }
-  } catch {
-    // wiki search failure é non-fatal: responde sem contexto
   }
 
   const systemPrompt =
@@ -161,6 +183,16 @@ async function executeWikiQuery(
 
   const totalTokens = completion.input_tokens + completion.output_tokens
   const costUsd = completion.estimated_cost_usd ?? 0
+
+  // Fire-and-forget write-back — non-fatal
+  void writeLesson({
+    agent_id: context.agent_id,
+    tenant_id: context.tenant_id,
+    aios_event_id: context.session_id ?? 'unknown',
+    question,
+    answer: completion.content,
+    write_mode: wikiWriteMode,
+  }).catch(() => undefined)
 
   return {
     ok: true,
