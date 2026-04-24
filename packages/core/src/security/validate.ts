@@ -7,6 +7,7 @@
 // ============================================================
 
 import { lookup } from 'node:dns/promises'
+import type { LookupAddress } from 'node:dns'
 import type { WikiPageType, WikiConfidence, WikiScope } from '../types/wiki.types'
 
 // ── Wiki Scope ───────────────────────────────────────────────
@@ -185,7 +186,7 @@ export class SecurityValidationError extends Error {
   }
 }
 
-const BLOCKED_RANGES = [
+const BLOCKED_RANGES: readonly RegExp[] = [
   /^10\./,
   /^172\.(1[6-9]|2\d|3[01])\./,
   /^192\.168\./,
@@ -193,6 +194,9 @@ const BLOCKED_RANGES = [
   /^169\.254\./,
   /^0\./,
   /^::1$/,
+  /^fe[89ab][0-9a-f]:/i,   // fe80::/10 link-local
+  /^fc/i,                   // fc00::/7  unique-local
+  /^fd/i,                   // fd00::/8  unique-local (assigned)
 ]
 
 export async function validateExternalUrl(url: string): Promise<void> {
@@ -205,7 +209,12 @@ export async function validateExternalUrl(url: string): Promise<void> {
   if (parsed.protocol !== 'https:') {
     throw new SecurityValidationError('A2A agents devem usar HTTPS')
   }
-  const addresses = await lookup(parsed.hostname, { all: true })
+  let addresses: LookupAddress[]
+  try {
+    addresses = await lookup(parsed.hostname, { all: true })
+  } catch {
+    throw new SecurityValidationError(`DNS resolution failed for host: ${parsed.hostname}`)
+  }
   for (const { address } of addresses) {
     if (BLOCKED_RANGES.some((re) => re.test(address))) {
       throw new SecurityValidationError(`IP bloqueado para agente A2A: ${address}`)

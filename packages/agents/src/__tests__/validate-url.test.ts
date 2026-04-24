@@ -49,4 +49,9 @@ describe('validateExternalUrl', () => {
     mockLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }])
     await expect(validateExternalUrl('https://example.com')).resolves.toBeUndefined()
   })
+
+  it('rejects https://10.0.0.1 (direct private IP in URL)', async () => {
+    mockLookup.mockResolvedValue([{ address: '10.0.0.1', family: 4 }])
+    await expect(validateExternalUrl('https://10.0.0.1')).rejects.toBeInstanceOf(SecurityValidationError)
+  })
 })
