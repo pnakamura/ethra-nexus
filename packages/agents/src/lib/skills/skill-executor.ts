@@ -188,7 +188,7 @@ async function executeWikiQuery(
   void writeLesson({
     agent_id: context.agent_id,
     tenant_id: context.tenant_id,
-    aios_event_id: context.session_id ?? 'unknown',
+    aios_event_id: context.session_id,
     question,
     answer: completion.content,
     write_mode: wikiWriteMode,

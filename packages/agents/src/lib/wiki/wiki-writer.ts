@@ -29,8 +29,6 @@ Responda APENAS com o JSON, sem markdown ao redor.`
 
 const VALID_TYPES = ['padrao', 'procedimento', 'conceito', 'referencia']
 
-const registry = createRegistryFromEnv()
-
 function titleToSlug(title: string): string {
   return title
     .toLowerCase()
@@ -42,6 +40,7 @@ function titleToSlug(title: string): string {
 }
 
 async function synthesizeLesson(question: string, answer: string): Promise<SynthesizedLesson | null> {
+  const registry = createRegistryFromEnv()
   try {
     const completion = await registry.complete('wiki:lint', {
       messages: [
