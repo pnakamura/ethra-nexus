@@ -175,6 +175,7 @@ export async function agentRoutes(app: FastifyInstance) {
       tags?: string[]
       budget_monthly?: string
       status?: string
+      a2a_enabled?: boolean
       skills?: SkillInput[]
       channels?: ChannelInput[]
     }
@@ -186,6 +187,20 @@ export async function agentRoutes(app: FastifyInstance) {
     const existing = await agentsDb.loadAgentWithDetails(agentId, request.tenantId)
     if (!existing || existing.status === 'archived') {
       return reply.status(404).send({ error: 'Agent not found' })
+    }
+
+    if (body.a2a_enabled === true) {
+      const a2aExisting = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(
+          eq(agents.tenant_id, request.tenantId),
+          eq(agents.a2a_enabled, true),
+        ))
+        .limit(1)
+      if (a2aExisting[0] && a2aExisting[0].id !== request.params.id) {
+        return reply.status(409).send({ error: 'Another agent already has a2a_enabled. Disable it first.' })
+      }
     }
 
     if (body.tone !== undefined && !isValidTone(body.tone)) {
@@ -222,6 +237,7 @@ export async function agentRoutes(app: FastifyInstance) {
         tags: string[]
         budget_monthly: string
         status: string
+        a2a_enabled: boolean
         updated_at: Date
       }> = { updated_at: new Date() }
       if (body.name !== undefined) agentUpdate.name = body.name
@@ -236,6 +252,7 @@ export async function agentRoutes(app: FastifyInstance) {
       if (body.tags !== undefined) agentUpdate.tags = body.tags
       if (body.budget_monthly !== undefined) agentUpdate.budget_monthly = body.budget_monthly
       if (body.status !== undefined) agentUpdate.status = body.status
+      if (body.a2a_enabled !== undefined) agentUpdate.a2a_enabled = body.a2a_enabled
 
       await tx.update(agents)
         .set(agentUpdate)
