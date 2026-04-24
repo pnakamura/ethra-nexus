@@ -24,6 +24,10 @@ const mockAgent = {
   model: 'claude-sonnet-4-6',
   system_prompt: 'Test prompt.',
   slug: 'test-agent',
+  wiki_enabled: true,
+  wiki_top_k: 5,
+  wiki_min_score: '0.72',
+  wiki_write_mode: 'supervised',
 }
 
 // Drizzle fluent chain: db.select().from().where().limit()

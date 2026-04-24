@@ -127,6 +127,10 @@ export async function executeTask(
     skillResult = await executeSkill(task.skill_id, context, task.input, {
       system_prompt: agent.system_prompt,
       model: agent.model,
+      wiki_enabled: agent.wiki_enabled ?? true,
+      wiki_top_k: agent.wiki_top_k ?? 5,
+      wiki_min_score: Number(agent.wiki_min_score ?? '0.72'),
+      wiki_write_mode: (agent.wiki_write_mode ?? 'supervised') as 'manual' | 'supervised' | 'auto',
     })
   } catch (err) {
     await agentsDb.updateAiosEvent(eventId, {
