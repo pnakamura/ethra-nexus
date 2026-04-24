@@ -7,7 +7,6 @@ const skip = !process.env['DATABASE_URL_TEST']
 
 describe.skipIf(skip)('A2A Protocol — E2E', () => {
   let app: FastifyInstance
-  let tenantId: string
   let agentId: string
   let jwtToken: string
 
@@ -28,9 +27,8 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
       url: '/api/v1/auth/login',
       payload: { slug: 'test-a2a', password: 'test123', name: 'A2A Test Tenant' },
     })
-    const { token, tenant } = loginRes.json<{ token: string; tenant: { id: string } }>()
+    const { token } = loginRes.json<{ token: string; tenant: { id: string } }>()
     jwtToken = token
-    tenantId = tenant.id
 
     const agentRes = await app.inject({
       method: 'POST',
@@ -40,7 +38,7 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
         name: 'Ambassador Agent',
         slug: 'ambassador',
         role: 'A2A public agent',
-        skills: [{ skill_name: 'channel:respond' }],
+        skills: [{ skill_id: 'channel:respond' }],
       },
     })
     agentId = agentRes.json<{ data: { id: string } }>().data.id
@@ -211,8 +209,8 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
         headers: { authorization: `Bearer ${jwtToken}` },
         payload: { url: 'http://example.com/a2a' },
       })
-      // validateExternalUrl mock resolves; http:// still fails on HTTPS check in real validate
-      // Since mock bypasses validate, this hits the Agent Card fetch — which fails → 400
+      // validateExternalUrl is fully mocked (resolves void); 400 comes from fetch failure
+      // (can't reach http://example.com/a2a in test environment — "Cannot reach agent")
       expect(res.statusCode).toBe(400)
     })
 

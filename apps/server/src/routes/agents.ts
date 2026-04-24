@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { eq, and } from 'drizzle-orm'
 import { getDb, agents, agentSkills, agentChannels } from '@ethra-nexus/db'
 import { executeTask, createAgentsDb } from '@ethra-nexus/agents'
-import { validateSlug, SecurityValidationError } from '@ethra-nexus/core'
+import { validateSlug, validateUUID, SecurityValidationError } from '@ethra-nexus/core'
 import {
   isValidSkillId,
   isValidChannelType,
@@ -180,6 +180,12 @@ export async function agentRoutes(app: FastifyInstance) {
       channels?: ChannelInput[]
     }
   }>('/agents/:id', async (request, reply) => {
+    try {
+      validateUUID(request.params.id, 'id')
+    } catch {
+      return reply.status(400).send({ error: 'Invalid agent id format' })
+    }
+
     const db = getDb()
     const agentId = request.params.id
     const body = request.body
@@ -187,20 +193,6 @@ export async function agentRoutes(app: FastifyInstance) {
     const existing = await agentsDb.loadAgentWithDetails(agentId, request.tenantId)
     if (!existing || existing.status === 'archived') {
       return reply.status(404).send({ error: 'Agent not found' })
-    }
-
-    if (body.a2a_enabled === true) {
-      const a2aExisting = await db
-        .select({ id: agents.id })
-        .from(agents)
-        .where(and(
-          eq(agents.tenant_id, request.tenantId),
-          eq(agents.a2a_enabled, true),
-        ))
-        .limit(1)
-      if (a2aExisting[0] && a2aExisting[0].id !== request.params.id) {
-        return reply.status(409).send({ error: 'Another agent already has a2a_enabled. Disable it first.' })
-      }
     }
 
     if (body.tone !== undefined && !isValidTone(body.tone)) {
@@ -223,89 +215,110 @@ export async function agentRoutes(app: FastifyInstance) {
       }
     }
 
-    const result = await db.transaction(async (tx) => {
-      const agentUpdate: Partial<{
-        name: string
-        model: string
-        system_prompt: string
-        system_prompt_extra: string | null
-        response_language: string
-        tone: string
-        restrictions: string[]
-        description: string | null
-        avatar_url: string | null
-        tags: string[]
-        budget_monthly: string
-        status: string
-        a2a_enabled: boolean
-        updated_at: Date
-      }> = { updated_at: new Date() }
-      if (body.name !== undefined) agentUpdate.name = body.name
-      if (body.model !== undefined) agentUpdate.model = body.model
-      if (body.system_prompt !== undefined) agentUpdate.system_prompt = body.system_prompt
-      if (body.system_prompt_extra !== undefined) agentUpdate.system_prompt_extra = body.system_prompt_extra
-      if (body.response_language !== undefined) agentUpdate.response_language = body.response_language
-      if (body.tone !== undefined) agentUpdate.tone = body.tone
-      if (body.restrictions !== undefined) agentUpdate.restrictions = body.restrictions
-      if (body.description !== undefined) agentUpdate.description = body.description
-      if (body.avatar_url !== undefined) agentUpdate.avatar_url = body.avatar_url
-      if (body.tags !== undefined) agentUpdate.tags = body.tags
-      if (body.budget_monthly !== undefined) agentUpdate.budget_monthly = body.budget_monthly
-      if (body.status !== undefined) agentUpdate.status = body.status
-      if (body.a2a_enabled !== undefined) agentUpdate.a2a_enabled = body.a2a_enabled
-
-      await tx.update(agents)
-        .set(agentUpdate)
-        .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
-
-      for (const skill of body.skills ?? []) {
-        const skillConfig = {
-          provider_override: skill.provider_override ?? null,
-          max_tokens_per_call: skill.max_tokens_per_call ?? null,
-          max_calls_per_hour: skill.max_calls_per_hour ?? null,
-          timeout_ms: skill.timeout_ms ?? null,
+    try {
+      const result = await db.transaction(async (tx) => {
+        if (body.a2a_enabled === true) {
+          const a2aExisting = await tx
+            .select({ id: agents.id })
+            .from(agents)
+            .where(and(
+              eq(agents.tenant_id, request.tenantId),
+              eq(agents.a2a_enabled, true),
+            ))
+            .limit(1)
+          if (a2aExisting[0] && a2aExisting[0].id !== request.params.id) {
+            throw Object.assign(new Error('Another agent already has a2a_enabled. Disable it first.'), { statusCode: 409 })
+          }
         }
-        await tx.insert(agentSkills)
-          .values({
-            agent_id: agentId,
-            tenant_id: request.tenantId,
-            skill_name: skill.skill_id,
-            skill_config: skillConfig,
-            enabled: skill.enabled ?? true,
-          })
-          .onConflictDoUpdate({
-            target: [agentSkills.agent_id, agentSkills.skill_name],
-            set: { skill_config: skillConfig, enabled: skill.enabled ?? true },
-          })
-      }
 
-      for (const channel of body.channels ?? []) {
-        await tx.insert(agentChannels)
-          .values({
-            agent_id: agentId,
-            tenant_id: request.tenantId,
-            channel_type: channel.channel_type,
-            enabled: channel.enabled ?? true,
-            config: channel.config,
-          })
-          .onConflictDoUpdate({
-            target: [agentChannels.agent_id, agentChannels.channel_type],
-            set: { config: channel.config, enabled: channel.enabled ?? true, updated_at: new Date() },
-          })
-      }
+        const agentUpdate: Partial<{
+          name: string
+          model: string
+          system_prompt: string
+          system_prompt_extra: string | null
+          response_language: string
+          tone: string
+          restrictions: string[]
+          description: string | null
+          avatar_url: string | null
+          tags: string[]
+          budget_monthly: string
+          status: string
+          a2a_enabled: boolean
+          updated_at: Date
+        }> = { updated_at: new Date() }
+        if (body.name !== undefined) agentUpdate.name = body.name
+        if (body.model !== undefined) agentUpdate.model = body.model
+        if (body.system_prompt !== undefined) agentUpdate.system_prompt = body.system_prompt
+        if (body.system_prompt_extra !== undefined) agentUpdate.system_prompt_extra = body.system_prompt_extra
+        if (body.response_language !== undefined) agentUpdate.response_language = body.response_language
+        if (body.tone !== undefined) agentUpdate.tone = body.tone
+        if (body.restrictions !== undefined) agentUpdate.restrictions = body.restrictions
+        if (body.description !== undefined) agentUpdate.description = body.description
+        if (body.avatar_url !== undefined) agentUpdate.avatar_url = body.avatar_url
+        if (body.tags !== undefined) agentUpdate.tags = body.tags
+        if (body.budget_monthly !== undefined) agentUpdate.budget_monthly = body.budget_monthly
+        if (body.status !== undefined) agentUpdate.status = body.status
+        if (body.a2a_enabled !== undefined) agentUpdate.a2a_enabled = body.a2a_enabled
 
-      const [[updatedAgent], updatedSkills, updatedChannels] = await Promise.all([
-        tx.select().from(agents)
+        await tx.update(agents)
+          .set(agentUpdate)
           .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
-          .limit(1),
-        tx.select().from(agentSkills).where(eq(agentSkills.agent_id, agentId)),
-        tx.select().from(agentChannels).where(eq(agentChannels.agent_id, agentId)),
-      ])
 
-      return { ...updatedAgent, skills: updatedSkills, channels: updatedChannels }
-    })
+        for (const skill of body.skills ?? []) {
+          const skillConfig = {
+            provider_override: skill.provider_override ?? null,
+            max_tokens_per_call: skill.max_tokens_per_call ?? null,
+            max_calls_per_hour: skill.max_calls_per_hour ?? null,
+            timeout_ms: skill.timeout_ms ?? null,
+          }
+          await tx.insert(agentSkills)
+            .values({
+              agent_id: agentId,
+              tenant_id: request.tenantId,
+              skill_name: skill.skill_id,
+              skill_config: skillConfig,
+              enabled: skill.enabled ?? true,
+            })
+            .onConflictDoUpdate({
+              target: [agentSkills.agent_id, agentSkills.skill_name],
+              set: { skill_config: skillConfig, enabled: skill.enabled ?? true },
+            })
+        }
 
-    return { data: result }
+        for (const channel of body.channels ?? []) {
+          await tx.insert(agentChannels)
+            .values({
+              agent_id: agentId,
+              tenant_id: request.tenantId,
+              channel_type: channel.channel_type,
+              enabled: channel.enabled ?? true,
+              config: channel.config,
+            })
+            .onConflictDoUpdate({
+              target: [agentChannels.agent_id, agentChannels.channel_type],
+              set: { config: channel.config, enabled: channel.enabled ?? true, updated_at: new Date() },
+            })
+        }
+
+        const [[updatedAgent], updatedSkills, updatedChannels] = await Promise.all([
+          tx.select().from(agents)
+            .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
+            .limit(1),
+          tx.select().from(agentSkills).where(eq(agentSkills.agent_id, agentId)),
+          tx.select().from(agentChannels).where(eq(agentChannels.agent_id, agentId)),
+        ])
+
+        return { ...updatedAgent, skills: updatedSkills, channels: updatedChannels }
+      })
+
+      return { data: result }
+    } catch (err) {
+      if (err instanceof Error && (err as Error & { statusCode?: number }).statusCode === 409) {
+        return reply.status(409).send({ error: err.message })
+      }
+      throw err
+    }
   })
 
   // DELETE /agents/:id — soft delete (status = 'archived')
