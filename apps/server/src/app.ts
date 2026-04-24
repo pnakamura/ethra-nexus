@@ -17,6 +17,7 @@ import { webhookRoutes } from './routes/webhooks'
 import { agentSkillsRoutes } from './routes/agent-skills'
 import { agentChannelsRoutes } from './routes/agent-channels'
 import { a2aManagementRoutes, a2aProtocolRoutes, a2aPublicRoutes } from './routes/a2a'
+import { wizardRoutes } from './routes/wizard'
 import { startSchedulerLoop } from '@ethra-nexus/agents'
 
 // ============================================================
@@ -89,6 +90,7 @@ export async function buildApp() {
   await app.register(a2aPublicRoutes)
   await app.register(a2aManagementRoutes, { prefix: '/api/v1' })
   await app.register(a2aProtocolRoutes, { prefix: '/api/v1' })
+  await app.register(wizardRoutes, { prefix: '/api/v1' })
 
   startSchedulerLoop()
 
