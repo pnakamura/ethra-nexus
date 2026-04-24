@@ -8,6 +8,7 @@ import {
   integer,
   numeric,
   index,
+  unique,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { tenants, agents } from './core'
@@ -53,5 +54,33 @@ export const aiosEvents = pgTable(
       table.started_at,
     ),
     aiosEventsAgentIdx: index('aios_events_agent_idx').on(table.agent_id, table.started_at),
+  }),
+)
+
+// agent_feedback — avaliações de execuções pelo usuário (Fase 22B)
+// Um feedback por evento (UNIQUE aios_event_id).
+// rating >= 4 dispara write-back na wiki do agente.
+export const agentFeedback = pgTable(
+  'agent_feedback',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenant_id: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    agent_id: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    aios_event_id: uuid('aios_event_id')
+      .notNull()
+      .references(() => aiosEvents.id, { onDelete: 'cascade' }),
+    rating: integer('rating').notNull(),
+    comment: text('comment'),
+    created_by: text('created_by'),
+    created_at: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    agentFeedbackEventUniq: unique('agent_feedback_event_unique').on(table.aios_event_id),
+    agentFeedbackAgentIdx: index('agent_feedback_agent_idx').on(table.agent_id, table.created_at),
+    agentFeedbackTenantIdx: index('agent_feedback_tenant_idx').on(table.tenant_id),
   }),
 )

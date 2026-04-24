@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
-import { eq, and } from 'drizzle-orm'
-import { getDb, agents, agentSkills, agentChannels } from '@ethra-nexus/db'
-import { executeTask, createAgentsDb } from '@ethra-nexus/agents'
+import { eq, and, desc, avg, count, sql } from 'drizzle-orm'
+import { getDb, agents, agentSkills, agentChannels, agentFeedback, aiosEvents } from '@ethra-nexus/db'
+import { executeTask, createAgentsDb, writeLesson } from '@ethra-nexus/agents'
 import { validateSlug, validateUUID, SecurityValidationError } from '@ethra-nexus/core'
 import {
   isValidSkillId,
@@ -467,6 +467,192 @@ export async function agentRoutes(app: FastifyInstance) {
         alerts_fired: alertsFired,
       },
     }
+  })
+
+  // GET /agents/:id/feedback — histórico de avaliações com métricas agregadas
+  app.get<{
+    Params: { id: string }
+    Querystring: { limit?: string }
+  }>('/agents/:id/feedback', async (request, reply) => {
+    try {
+      validateUUID(request.params.id, 'id')
+    } catch {
+      return reply.status(400).send({ error: 'Invalid agent id format' })
+    }
+
+    const db = getDb()
+    const agentId = request.params.id
+
+    const agentRows = await db
+      .select({ id: agents.id, status: agents.status })
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
+      .limit(1)
+
+    if (!agentRows[0] || agentRows[0].status === 'archived') {
+      return reply.status(404).send({ error: 'Agent not found' })
+    }
+
+    const limitParam = parseInt(request.query.limit ?? '20', 10)
+    const limit = isNaN(limitParam) || limitParam < 1 ? 20 : Math.min(limitParam, 100)
+
+    const [items, agg] = await Promise.all([
+      db
+        .select({
+          id: agentFeedback.id,
+          aios_event_id: agentFeedback.aios_event_id,
+          rating: agentFeedback.rating,
+          comment: agentFeedback.comment,
+          created_by: agentFeedback.created_by,
+          created_at: agentFeedback.created_at,
+          event_skill_id: aiosEvents.skill_id,
+          event_status: aiosEvents.status,
+          event_triggered_at: aiosEvents.triggered_at,
+        })
+        .from(agentFeedback)
+        .innerJoin(aiosEvents, eq(agentFeedback.aios_event_id, aiosEvents.id))
+        .where(and(eq(agentFeedback.agent_id, agentId), eq(agentFeedback.tenant_id, request.tenantId)))
+        .orderBy(desc(agentFeedback.created_at))
+        .limit(limit),
+      db
+        .select({
+          avg_rating: avg(agentFeedback.rating),
+          total: count(agentFeedback.id),
+          r1: count(sql`CASE WHEN ${agentFeedback.rating} = 1 THEN 1 END`),
+          r2: count(sql`CASE WHEN ${agentFeedback.rating} = 2 THEN 1 END`),
+          r3: count(sql`CASE WHEN ${agentFeedback.rating} = 3 THEN 1 END`),
+          r4: count(sql`CASE WHEN ${agentFeedback.rating} = 4 THEN 1 END`),
+          r5: count(sql`CASE WHEN ${agentFeedback.rating} = 5 THEN 1 END`),
+        })
+        .from(agentFeedback)
+        .where(and(eq(agentFeedback.agent_id, agentId), eq(agentFeedback.tenant_id, request.tenantId))),
+    ])
+
+    const meta = agg[0]
+    return {
+      data: items.map((f) => ({
+        id: f.id,
+        aios_event_id: f.aios_event_id,
+        rating: f.rating,
+        comment: f.comment,
+        created_by: f.created_by,
+        created_at: f.created_at,
+        event: {
+          skill_id: f.event_skill_id,
+          status: f.event_status,
+          triggered_at: f.event_triggered_at,
+        },
+      })),
+      meta: {
+        total: Number(meta?.total ?? 0),
+        avg_rating: meta?.avg_rating != null ? Math.round(Number(meta.avg_rating) * 100) / 100 : null,
+        count_by_rating: {
+          1: Number(meta?.r1 ?? 0),
+          2: Number(meta?.r2 ?? 0),
+          3: Number(meta?.r3 ?? 0),
+          4: Number(meta?.r4 ?? 0),
+          5: Number(meta?.r5 ?? 0),
+        },
+      },
+    }
+  })
+
+  // POST /agents/:id/feedback — registra avaliação de uma execução
+  // rating >= 4 dispara write-back na wiki (fire-and-forget)
+  app.post<{
+    Params: { id: string }
+    Body: { aios_event_id: string; rating: number; comment?: string }
+  }>('/agents/:id/feedback', async (request, reply) => {
+    try {
+      validateUUID(request.params.id, 'id')
+    } catch {
+      return reply.status(400).send({ error: 'Invalid agent id format' })
+    }
+
+    const { aios_event_id, rating, comment } = request.body
+
+    if (!aios_event_id) {
+      return reply.status(400).send({ error: 'aios_event_id is required' })
+    }
+    try {
+      validateUUID(aios_event_id, 'aios_event_id')
+    } catch {
+      return reply.status(400).send({ error: 'Invalid aios_event_id format' })
+    }
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return reply.status(400).send({ error: 'rating must be an integer between 1 and 5' })
+    }
+    if (comment !== undefined && comment.length > 500) {
+      return reply.status(400).send({ error: 'comment must be 500 characters or less' })
+    }
+
+    const db = getDb()
+    const agentId = request.params.id
+
+    const [agentRow, eventRow] = await Promise.all([
+      db
+        .select({ id: agents.id, status: agents.status, wiki_write_mode: agents.wiki_write_mode })
+        .from(agents)
+        .where(and(eq(agents.id, agentId), eq(agents.tenant_id, request.tenantId)))
+        .limit(1),
+      db
+        .select({ id: aiosEvents.id, payload: aiosEvents.payload, result: aiosEvents.result })
+        .from(aiosEvents)
+        .where(and(
+          eq(aiosEvents.id, aios_event_id),
+          eq(aiosEvents.agent_id, agentId),
+          eq(aiosEvents.tenant_id, request.tenantId),
+        ))
+        .limit(1),
+    ])
+
+    if (!agentRow[0] || agentRow[0].status === 'archived') {
+      return reply.status(404).send({ error: 'Agent not found' })
+    }
+    if (!eventRow[0]) {
+      return reply.status(404).send({ error: 'Event not found for this agent' })
+    }
+
+    const createdBy = request.headers['x-user-id'] as string | undefined
+
+    const [saved] = await db
+      .insert(agentFeedback)
+      .values({
+        tenant_id: request.tenantId,
+        agent_id: agentId,
+        aios_event_id,
+        rating,
+        comment: comment ?? null,
+        created_by: createdBy ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [agentFeedback.aios_event_id],
+        set: { rating, comment: comment ?? null, created_by: createdBy ?? null },
+      })
+      .returning()
+
+    // Wiki write-back: rating >= 4 reforça lição aprendida
+    if (rating >= 4) {
+      const event = eventRow[0]
+      const payload = event.payload as Record<string, unknown>
+      const result = event.result as Record<string, unknown> | null
+      const question = typeof payload['question'] === 'string' ? payload['question'] : ''
+      const answer = typeof result?.['answer'] === 'string' ? result['answer'] : ''
+
+      if (question && answer) {
+        const writeMode = (agentRow[0].wiki_write_mode ?? 'supervised') as 'manual' | 'supervised' | 'auto'
+        void writeLesson({
+          agent_id: agentId,
+          tenant_id: request.tenantId,
+          aios_event_id,
+          question,
+          answer,
+          write_mode: writeMode,
+        }).catch(() => undefined)
+      }
+    }
+
+    return reply.status(201).send({ data: saved })
   })
 
   // POST /agents/:id/ask — pergunta ao agente (delega ao AIOS Master)

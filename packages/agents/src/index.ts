@@ -45,6 +45,10 @@ export { validateCron, calcNextRun } from './lib/scheduler/cron-utils'
 export { dispatchOutput } from './lib/scheduler/output-dispatcher'
 export type { DispatchSource } from './lib/scheduler/output-dispatcher'
 
+// Wiki Writer
+export { writeLesson } from './lib/wiki/wiki-writer'
+export type { WikiLessonInput } from './lib/wiki/wiki-writer'
+
 // A2A Protocol
 export { A2AClient } from './lib/a2a/client'
 export { AgentCardSchema } from './lib/a2a/schemas'
