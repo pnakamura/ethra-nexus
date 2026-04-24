@@ -176,6 +176,10 @@ export async function agentRoutes(app: FastifyInstance) {
       budget_monthly?: string
       status?: string
       a2a_enabled?: boolean
+      wiki_enabled?: boolean
+      wiki_top_k?: number
+      wiki_min_score?: number
+      wiki_write_mode?: 'auto' | 'supervised' | 'manual'
       skills?: SkillInput[]
       channels?: ChannelInput[]
     }
@@ -197,6 +201,16 @@ export async function agentRoutes(app: FastifyInstance) {
 
     if (body.tone !== undefined && !isValidTone(body.tone)) {
       return reply.status(400).send({ error: `Invalid tone: "${body.tone}"` })
+    }
+
+    if (body.wiki_top_k !== undefined && (body.wiki_top_k < 1 || body.wiki_top_k > 20)) {
+      return reply.status(400).send({ error: 'wiki_top_k must be between 1 and 20' })
+    }
+    if (body.wiki_min_score !== undefined && (body.wiki_min_score < 0 || body.wiki_min_score > 1)) {
+      return reply.status(400).send({ error: 'wiki_min_score must be between 0 and 1' })
+    }
+    if (body.wiki_write_mode !== undefined && !['auto', 'supervised', 'manual'].includes(body.wiki_write_mode)) {
+      return reply.status(400).send({ error: 'wiki_write_mode must be auto, supervised, or manual' })
     }
 
     for (const skill of body.skills ?? []) {
@@ -245,6 +259,10 @@ export async function agentRoutes(app: FastifyInstance) {
           budget_monthly: string
           status: string
           a2a_enabled: boolean
+          wiki_enabled: boolean
+          wiki_top_k: number
+          wiki_min_score: string
+          wiki_write_mode: 'auto' | 'supervised' | 'manual'
           updated_at: Date
         }> = { updated_at: new Date() }
         if (body.name !== undefined) agentUpdate.name = body.name
@@ -260,6 +278,10 @@ export async function agentRoutes(app: FastifyInstance) {
         if (body.budget_monthly !== undefined) agentUpdate.budget_monthly = body.budget_monthly
         if (body.status !== undefined) agentUpdate.status = body.status
         if (body.a2a_enabled !== undefined) agentUpdate.a2a_enabled = body.a2a_enabled
+        if (body.wiki_enabled !== undefined) agentUpdate.wiki_enabled = body.wiki_enabled
+        if (body.wiki_top_k !== undefined) agentUpdate.wiki_top_k = body.wiki_top_k
+        if (body.wiki_min_score !== undefined) agentUpdate.wiki_min_score = String(body.wiki_min_score)
+        if (body.wiki_write_mode !== undefined) agentUpdate.wiki_write_mode = body.wiki_write_mode
 
         await tx.update(agents)
           .set(agentUpdate)

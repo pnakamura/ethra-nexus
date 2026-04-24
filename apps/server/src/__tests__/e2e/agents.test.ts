@@ -756,3 +756,126 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Channels endpoints', ()
     expect(res.statusCode).toBe(404)
   })
 })
+
+describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Wiki config nos agentes', () => {
+  let app: FastifyInstance
+  let tenantId: string
+  let agentId: string
+
+  beforeAll(async () => {
+    const { buildApp } = await import('../../app')
+    app = await buildApp()
+
+    const tenantRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: 'Wiki Test Tenant', slug: `wiki-tenant-${Date.now()}` },
+    })
+    tenantId = (JSON.parse(tenantRes.body) as { data: { id: string } }).data.id
+  })
+
+  afterAll(async () => {
+    await app.close()
+  })
+
+  beforeEach(async () => {
+    const token = await app.jwt.sign({ tenantId })
+    const agentRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/agents',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Wiki Agent',
+        slug: `wiki-agent-${Date.now()}`,
+        role: 'assistente',
+      },
+    })
+    agentId = (JSON.parse(agentRes.body) as { data: { id: string } }).data.id
+  })
+
+  afterEach(async () => {
+    const token = await app.jwt.sign({ tenantId })
+    await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/agents/${agentId}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+  })
+
+  async function patch(payload: Record<string, unknown>) {
+    const token = await app.jwt.sign({ tenantId })
+    return app.inject({
+      method: 'PATCH',
+      url: `/api/v1/agents/${agentId}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload,
+    })
+  }
+
+  it('GET /agents/:id retorna campos wiki com defaults', async () => {
+    const token = await app.jwt.sign({ tenantId })
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/agents/${agentId}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const agent = (JSON.parse(res.body) as { data: Record<string, unknown> }).data
+    expect(agent['wiki_enabled']).toBe(true)
+    expect(agent['wiki_top_k']).toBe(5)
+    expect(Number(agent['wiki_min_score'])).toBeCloseTo(0.72)
+    expect(agent['wiki_write_mode']).toBe('supervised')
+  })
+
+  it('PATCH wiki_enabled: false — desabilita wiki do agente', async () => {
+    const res = await patch({ wiki_enabled: false })
+    expect(res.statusCode).toBe(200)
+    const agent = (JSON.parse(res.body) as { data: Record<string, unknown> }).data
+    expect(agent['wiki_enabled']).toBe(false)
+  })
+
+  it('PATCH wiki_top_k: 10 — atualiza valor', async () => {
+    const res = await patch({ wiki_top_k: 10 })
+    expect(res.statusCode).toBe(200)
+    const agent = (JSON.parse(res.body) as { data: Record<string, unknown> }).data
+    expect(agent['wiki_top_k']).toBe(10)
+  })
+
+  it('PATCH wiki_top_k: 0 — retorna 400 (fora do range 1-20)', async () => {
+    const res = await patch({ wiki_top_k: 0 })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('PATCH wiki_top_k: 21 — retorna 400 (fora do range 1-20)', async () => {
+    const res = await patch({ wiki_top_k: 21 })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('PATCH wiki_min_score: 0.85 — atualiza valor', async () => {
+    const res = await patch({ wiki_min_score: 0.85 })
+    expect(res.statusCode).toBe(200)
+    const agent = (JSON.parse(res.body) as { data: Record<string, unknown> }).data
+    expect(Number(agent['wiki_min_score'])).toBeCloseTo(0.85)
+  })
+
+  it('PATCH wiki_min_score: -0.1 — retorna 400', async () => {
+    const res = await patch({ wiki_min_score: -0.1 })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('PATCH wiki_min_score: 1.1 — retorna 400', async () => {
+    const res = await patch({ wiki_min_score: 1.1 })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('PATCH wiki_write_mode: auto — atualiza valor', async () => {
+    const res = await patch({ wiki_write_mode: 'auto' })
+    expect(res.statusCode).toBe(200)
+    const agent = (JSON.parse(res.body) as { data: Record<string, unknown> }).data
+    expect(agent['wiki_write_mode']).toBe('auto')
+  })
+
+  it('PATCH wiki_write_mode: invalid — retorna 400', async () => {
+    const res = await patch({ wiki_write_mode: 'invalid' })
+    expect(res.statusCode).toBe(400)
+  })
+})
