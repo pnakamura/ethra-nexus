@@ -52,12 +52,23 @@ export async function authRoutes(app: FastifyInstance) {
     if (password.length < 8) {
       return reply.status(400).send({ error: 'password must be at least 8 characters' })
     }
+    if (name.length > 100) {
+      return reply.status(400).send({ error: 'name must be at most 100 characters' })
+    }
+    if (slug.length > 63) {
+      return reply.status(400).send({ error: 'slug must be at most 63 characters' })
+    }
+    if (password.length > 72) {
+      return reply.status(400).send({ error: 'password must be at most 72 characters' })
+    }
     const db = getDb()
-    const existing = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug)).limit(1)
+    const [existing, password_hash] = await Promise.all([
+      db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug)).limit(1),
+      bcrypt.hash(password, 12),
+    ])
     if (existing[0]) {
       return reply.status(409).send({ error: 'slug already taken' })
     }
-    const password_hash = await bcrypt.hash(password, 12)
     const inserted = await db.insert(tenants).values({ name, slug, password_hash }).returning()
     const tenant = inserted[0]
     if (!tenant) {
