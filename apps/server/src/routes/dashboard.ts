@@ -7,9 +7,8 @@ export async function dashboardRoutes(app: FastifyInstance) {
     const db = getDb()
     const tenantId = request.tenantId
 
-    const monthStart = new Date()
-    monthStart.setDate(1)
-    monthStart.setHours(0, 0, 0, 0)
+    const now = new Date()
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
 
     const [activeAgents, eventStats, recentAgents] = await Promise.all([
       db
