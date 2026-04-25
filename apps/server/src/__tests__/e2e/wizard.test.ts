@@ -1,5 +1,5 @@
 // apps/server/src/__tests__/e2e/wizard.test.ts
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 
 const mockQuestions = [
@@ -55,11 +55,7 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Clone Wizard sessions',
     app = await buildApp()
     await app.ready()
     token = await app.jwt.sign({ tenantId: TEST_TENANT_ID, email: 'test@test.com', role: 'admin' })
-  })
 
-  afterAll(async () => { await app.close() })
-
-  beforeEach(async () => {
     const agentRes = await app.inject({
       method: 'POST',
       url: '/api/v1/agents',
@@ -74,12 +70,17 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Clone Wizard sessions',
     agentId = (agentRes.json() as { data: { id: string } }).data.id
   })
 
-  afterEach(async () => {
+  afterAll(async () => {
     const drizzle = db.getDb()
-    await drizzle.delete(db.cloneWizardSessions).where(db.eq(db.cloneWizardSessions.agent_id, agentId))
     await drizzle.delete(db.agents).where(
       db.and(db.eq(db.agents.id, agentId), db.eq(db.agents.tenant_id, TEST_TENANT_ID))
     )
+    await app.close()
+  })
+
+  afterEach(async () => {
+    const drizzle = db.getDb()
+    await drizzle.delete(db.cloneWizardSessions).where(db.eq(db.cloneWizardSessions.agent_id, agentId))
   })
 
   // ── POST /sessions — iniciar ──────────────────────────────
