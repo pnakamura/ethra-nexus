@@ -98,6 +98,7 @@ export async function agentRoutes(app: FastifyInstance) {
           name,
           slug,
           role,
+          status: 'active',
           model: model ?? 'claude-sonnet-4-6',
           system_prompt: system_prompt ?? '',
           system_prompt_extra: system_prompt_extra ?? null,

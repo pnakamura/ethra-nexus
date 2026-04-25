@@ -96,7 +96,7 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: AIOS endpoints', () => 
         skill_id: 'wiki:lint',
         activation_mode: 'on_demand',
         payload: {},
-        status: 'completed',
+        status: 'ok',
       })
 
       const response = await app.inject({
