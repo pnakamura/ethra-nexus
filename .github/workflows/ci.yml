@@ -125,6 +125,12 @@ jobs:
             echo "→ $(basename $f)"
             psql -h localhost -U postgres -d ethra_test -f "$f"
           done
+          psql -h localhost -U postgres -d ethra_test -c "
+            INSERT INTO tenants (id, name, slug, plan) VALUES
+              ('00000000-0000-0000-0000-000000000001', 'Test Tenant', 'test-tenant', 'self-hosted'),
+              ('00000000-0000-0000-0000-000000000002', 'Tenant B', 'tenant-b', 'self-hosted')
+            ON CONFLICT DO NOTHING;
+          "
 
       - name: Build workspace packages
         run: npx turbo run build --filter=!@ethra-nexus/server --filter=!@ethra-nexus/web
