@@ -2,6 +2,8 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import jwt from '@fastify/jwt'
+import fastifyStatic from '@fastify/static'
+import { join } from 'path'
 import { getDb } from '@ethra-nexus/db'
 import type { Database } from '@ethra-nexus/db'
 import { healthRoutes } from './routes/health'
@@ -95,6 +97,19 @@ export async function buildApp() {
   await app.register(dashboardRoutes, { prefix: '/api/v1' })
 
   startSchedulerLoop()
+
+  // Serve React frontend (production Docker: apps/web/dist → /app/public)
+  if (process.env['NODE_ENV'] === 'production') {
+    await app.register(fastifyStatic, {
+      root: join(process.cwd(), 'public'),
+      prefix: '/',
+    })
+    app.setNotFoundHandler((_request, reply) => {
+      // SPA fallback — serve index.html for all unmatched non-API routes
+      // (API 404s are handled by the routes themselves)
+      return reply.sendFile('index.html')
+    })
+  }
 
   return app
 }
