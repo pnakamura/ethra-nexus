@@ -6,7 +6,20 @@ import type { FastifyInstance } from 'fastify'
 // vi.mock must be at top level for Vitest hoisting — the factory runs lazily
 vi.mock('@ethra-nexus/agents', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@ethra-nexus/agents')>()
-  return { ...mod, startSchedulerLoop: vi.fn() }
+  return {
+    ...mod,
+    startSchedulerLoop: vi.fn(),
+    // CI has no ANTHROPIC_API_KEY, so the real executeTask would throw at provider init.
+    executeTask: vi.fn().mockResolvedValue({
+      ok: true,
+      data: { answer: 'mocked wiki:lint response' },
+      agent_id: '00000000-0000-0000-0001-000000000001',
+      skill_id: 'wiki:lint',
+      timestamp: new Date().toISOString(),
+      tokens_used: 100,
+      cost_usd: 0.01,
+    }),
+  }
 })
 
 const TEST_TENANT_ID = '00000000-0000-0000-0000-000000000001'
@@ -75,11 +88,15 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: AIOS endpoints', () => 
 
   describe('GET /api/v1/aios/events', () => {
     it('retorna lista de eventos do tenant', async () => {
-      await app.inject({
-        method: 'POST',
-        url: '/api/v1/aios/execute',
-        headers: { Authorization: `Bearer ${token}` },
-        payload: { agent_id: TEST_AGENT_ID, skill_id: 'wiki:lint', input: {} },
+      // executeTask is mocked, so insert an event directly to exercise the GET.
+      const drizzle = db.getDb()
+      await drizzle.insert(db.aiosEvents).values({
+        tenant_id: TEST_TENANT_ID,
+        agent_id: TEST_AGENT_ID,
+        skill_id: 'wiki:lint',
+        activation_mode: 'on_demand',
+        payload: {},
+        status: 'completed',
       })
 
       const response = await app.inject({

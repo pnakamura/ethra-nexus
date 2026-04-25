@@ -2,6 +2,33 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { buildApp } from '../../app'
 import type { FastifyInstance } from 'fastify'
 
+// Top-level mocks — Vitest hoists these and warns if nested.
+vi.mock('@ethra-nexus/core', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@ethra-nexus/core')>()
+  return {
+    ...orig,
+    validateExternalUrl: vi.fn().mockResolvedValue(undefined),
+  }
+})
+
+vi.mock('@ethra-nexus/agents', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@ethra-nexus/agents')>()
+  return {
+    ...mod,
+    startSchedulerLoop: vi.fn(),
+    // CI has no ANTHROPIC_API_KEY, so the real executeTask would throw at provider init.
+    executeTask: vi.fn().mockResolvedValue({
+      ok: true,
+      data: { answer: 'mocked a2a response' },
+      agent_id: 'mock-agent',
+      skill_id: 'channel:respond',
+      timestamp: new Date().toISOString(),
+      tokens_used: 50,
+      cost_usd: 0.001,
+    }),
+  }
+})
+
 // Skip all if no test DB available
 const skip = !process.env['DATABASE_URL_TEST']
 
@@ -12,14 +39,6 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
   let tenantSlug: string
 
   beforeAll(async () => {
-    vi.mock('@ethra-nexus/core', async (importOriginal) => {
-      const orig = await importOriginal<typeof import('@ethra-nexus/core')>()
-      return {
-        ...orig,
-        validateExternalUrl: vi.fn().mockResolvedValue(undefined),
-      }
-    })
-
     app = await buildApp()
     await app.ready()
 

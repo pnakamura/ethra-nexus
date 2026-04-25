@@ -133,8 +133,8 @@ jobs:
               ('00000000-0000-0000-0000-000000000002', 'Tenant B', 'tenant-b', 'self-hosted'),
               ('00000000-0000-0000-0000-000000000003', 'Tenant C', 'tenant-c', 'self-hosted')
             ON CONFLICT DO NOTHING;
-            INSERT INTO agents (id, tenant_id, name, slug, role) VALUES
-              ('00000000-0000-0000-0001-000000000001', '00000000-0000-0000-0000-000000000001', 'Test Seed Agent', 'test-agent', 'support')
+            INSERT INTO agents (id, tenant_id, name, slug, role, status, budget_monthly) VALUES
+              ('00000000-0000-0000-0001-000000000001', '00000000-0000-0000-0000-000000000001', 'Test Seed Agent', 'test-agent', 'support', 'active', 0.50)
             ON CONFLICT DO NOTHING;
           "
 
