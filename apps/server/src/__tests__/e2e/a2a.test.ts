@@ -9,6 +9,7 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
   let app: FastifyInstance
   let agentId: string
   let jwtToken: string
+  let tenantSlug: string
 
   beforeAll(async () => {
     vi.mock('@ethra-nexus/core', async (importOriginal) => {
@@ -22,10 +23,11 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
     app = await buildApp()
     await app.ready()
 
+    tenantSlug = `test-a2a-${Date.now()}`
     const signupRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/signup',
-      payload: { slug: `test-a2a-${Date.now()}`, password: 'test12345', name: 'A2A Test Tenant' },
+      payload: { slug: tenantSlug, password: 'test12345', name: 'A2A Test Tenant' },
     })
     const { token } = signupRes.json<{ token: string; tenant: { id: string } }>()
     jwtToken = token
@@ -81,7 +83,7 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
 
   describe('GET /.well-known/agent.json', () => {
     it('returns Agent Card for a2a_enabled agent', async () => {
-      const res = await app.inject({ method: 'GET', url: '/.well-known/agent.json' })
+      const res = await app.inject({ method: 'GET', url: `/.well-known/agent.json?tenant_slug=${tenantSlug}` })
       expect(res.statusCode).toBe(200)
       const card = res.json()
       expect(card.name).toBe('Ambassador Agent')
@@ -96,7 +98,7 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
         headers: { authorization: `Bearer ${jwtToken}` },
         payload: { a2a_enabled: false },
       })
-      const res = await app.inject({ method: 'GET', url: '/.well-known/agent.json' })
+      const res = await app.inject({ method: 'GET', url: `/.well-known/agent.json?tenant_slug=${tenantSlug}` })
       expect(res.statusCode).toBe(404)
       // Re-enable
       await app.inject({
