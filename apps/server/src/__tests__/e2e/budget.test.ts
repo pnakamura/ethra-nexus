@@ -1,5 +1,5 @@
 // apps/server/src/__tests__/e2e/budget.test.ts
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 
 vi.mock('@ethra-nexus/agents', async (importOriginal) => {
