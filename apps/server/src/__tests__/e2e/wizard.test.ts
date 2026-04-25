@@ -40,7 +40,7 @@ vi.mock('@ethra-nexus/agents', async (importOriginal) => {
   }
 })
 
-const TEST_TENANT_ID = '00000000-0000-0000-0000-000000000001'
+const TEST_TENANT_ID = '00000000-0000-0000-0000-000000000002'
 
 describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Clone Wizard sessions', () => {
   let app: FastifyInstance
