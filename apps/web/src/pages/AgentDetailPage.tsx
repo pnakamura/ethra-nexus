@@ -6,6 +6,8 @@ import { IdentitySection } from '@/components/agents/sections/IdentitySection'
 import { SkillsSection } from '@/components/agents/sections/SkillsSection'
 import { useAgent } from '@/hooks/useAgent'
 import { cn } from '@/lib/utils'
+import { BudgetSection } from '@/components/agents/sections/BudgetSection'
+import { FeedbackSection } from '@/components/agents/sections/FeedbackSection'
 
 const SECTIONS = [
   { id: 'identity', label: 'Identidade', icon: User },
@@ -82,8 +84,8 @@ export function AgentDetailPage() {
                     <p>Acesse a interface do SilverBullet para gerenciar o conhecimento deste agente.</p>
                   </div>
                 )}
-                {activeSection === 'budget' && <BudgetSectionPlaceholder agentId={agent.id} />}
-                {activeSection === 'feedback' && <FeedbackSectionPlaceholder agentId={agent.id} />}
+                {activeSection === 'budget' && <BudgetSection agentId={agent.id} />}
+                {activeSection === 'feedback' && <FeedbackSection agentId={agent.id} />}
               </>
             : null
           }
@@ -91,11 +93,4 @@ export function AgentDetailPage() {
       </div>
     </div>
   )
-}
-
-function BudgetSectionPlaceholder({ agentId }: { agentId: string }) {
-  return <div className="text-sm text-muted-foreground">Budget — implementado na Task 11 (agentId: {agentId})</div>
-}
-function FeedbackSectionPlaceholder({ agentId }: { agentId: string }) {
-  return <div className="text-sm text-muted-foreground">Feedback — implementado na Task 11 (agentId: {agentId})</div>
 }
