@@ -126,6 +126,9 @@ jobs:
             psql -h localhost -U postgres -d ethra_test -f "$f"
           done
 
+      - name: Build workspace packages
+        run: npx turbo run build --filter=!@ethra-nexus/server --filter=!@ethra-nexus/web
+
       - name: Run E2E tests
         run: cd apps/server && npx vitest run --reporter=verbose
 
