@@ -7,7 +7,6 @@ export const createAgentSchema = z.object({
   system_prompt: z.string().optional(),
   model: z.string().optional(),
   tone: z.enum(['formal', 'informal', 'tecnico', 'amigavel']).optional(),
-  budget_monthly: z.string().optional(),
 })
 
 export type CreateAgentInput = z.infer<typeof createAgentSchema>

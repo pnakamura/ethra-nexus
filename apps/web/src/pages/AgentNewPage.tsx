@@ -17,8 +17,12 @@ export function AgentNewPage() {
   })
 
   const onSubmit = async (data: CreateAgentInput) => {
-    const agent = await createAgent.mutateAsync(data)
-    navigate(`/agents/${agent.id}`)
+    try {
+      const agent = await createAgent.mutateAsync(data)
+      navigate(`/agents/${agent.id}`)
+    } catch {
+      // error handled by useCreateAgent onError toast
+    }
   }
 
   return (

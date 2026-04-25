@@ -1,6 +1,5 @@
 import axios from 'axios'
-
-const STORAGE_KEY = 'ethra_token'
+import { STORAGE_KEY } from '@/contexts/AuthContext'
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api/v1',
