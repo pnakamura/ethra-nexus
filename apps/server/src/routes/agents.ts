@@ -141,10 +141,8 @@ export async function agentRoutes(app: FastifyInstance) {
           )
         }
 
-        const [savedSkills, savedChannels] = await Promise.all([
-          tx.select().from(agentSkills).where(eq(agentSkills.agent_id, agent.id)),
-          tx.select().from(agentChannels).where(eq(agentChannels.agent_id, agent.id)),
-        ])
+        const savedSkills = await tx.select().from(agentSkills).where(eq(agentSkills.agent_id, agent.id))
+        const savedChannels = await tx.select().from(agentChannels).where(eq(agentChannels.agent_id, agent.id))
 
         return { ...agent, skills: savedSkills, channels: savedChannels }
       })

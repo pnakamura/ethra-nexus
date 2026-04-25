@@ -121,6 +121,8 @@ jobs:
         run: |
           grep -v "pgjwt" infra/vps/init-db.sql > /tmp/init-ci.sql
           psql -h localhost -U postgres -d ethra_test -f /tmp/init-ci.sql
+          # Stub auth.users so migration 001 tenant_members FK doesn't fail
+          psql -h localhost -U postgres -d ethra_test -c "CREATE TABLE IF NOT EXISTS auth.users (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), email TEXT UNIQUE);"
           for f in $(ls infra/supabase/migrations/*.sql | sort); do
             echo "→ $(basename $f)"
             psql -h localhost -U postgres -d ethra_test -f "$f"
