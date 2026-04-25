@@ -61,7 +61,7 @@ export async function buildApp() {
   // ── Global hook: JWT + tenant isolation ──────────────────
   app.addHook('onRequest', async (request, reply) => {
     // Skip auth for public routes
-    const publicPaths = ['/api/v1/health', '/api/v1/auth/login', '/api/v1/webhooks', '/.well-known', '/api/v1/a2a']
+    const publicPaths = ['/api/v1/health', '/api/v1/auth/login', '/api/v1/auth/signup', '/api/v1/webhooks', '/.well-known', '/api/v1/a2a']
     if (publicPaths.some((p) => request.url.startsWith(p))) {
       return
     }
