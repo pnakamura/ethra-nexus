@@ -22,12 +22,12 @@ describe.skipIf(skip)('A2A Protocol — E2E', () => {
     app = await buildApp()
     await app.ready()
 
-    const loginRes = await app.inject({
+    const signupRes = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/login',
-      payload: { slug: 'test-a2a', password: 'test123', name: 'A2A Test Tenant' },
+      url: '/api/v1/auth/signup',
+      payload: { slug: `test-a2a-${Date.now()}`, password: 'test12345', name: 'A2A Test Tenant' },
     })
-    const { token } = loginRes.json<{ token: string; tenant: { id: string } }>()
+    const { token } = signupRes.json<{ token: string; tenant: { id: string } }>()
     jwtToken = token
 
     const agentRes = await app.inject({

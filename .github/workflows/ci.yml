@@ -130,7 +130,11 @@ jobs:
           psql -h localhost -U postgres -d ethra_test -c "
             INSERT INTO tenants (id, name, slug, plan) VALUES
               ('00000000-0000-0000-0000-000000000001', 'Test Tenant', 'test-tenant', 'self-hosted'),
-              ('00000000-0000-0000-0000-000000000002', 'Tenant B', 'tenant-b', 'self-hosted')
+              ('00000000-0000-0000-0000-000000000002', 'Tenant B', 'tenant-b', 'self-hosted'),
+              ('00000000-0000-0000-0000-000000000003', 'Tenant C', 'tenant-c', 'self-hosted')
+            ON CONFLICT DO NOTHING;
+            INSERT INTO agents (id, tenant_id, name, slug, role) VALUES
+              ('00000000-0000-0000-0001-000000000001', '00000000-0000-0000-0000-000000000001', 'Test Seed Agent', 'test-agent', 'support')
             ON CONFLICT DO NOTHING;
           "
 

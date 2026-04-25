@@ -98,8 +98,11 @@ describe('validateChannelConfig', () => {
 })
 
 // ── Testes de rota (E2E — requer DATABASE_URL_TEST) ──────────
+// Use tenant 3 (dedicated) so the mass-delete-by-tenant-id afterEach hooks
+// don't clobber agents created by other test files (budget, aios, schedules,
+// webhooks, wizard) running concurrently in parallel Vitest workers.
 
-const TEST_TENANT_ID = '00000000-0000-0000-0000-000000000001'
+const TEST_TENANT_ID = '00000000-0000-0000-0000-000000000003'
 
 describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Agent CRUD endpoints', () => {
   let app: FastifyInstance
@@ -765,13 +768,9 @@ describe.skipIf(!process.env['DATABASE_URL_TEST'])('E2E: Wiki config nos agentes
   beforeAll(async () => {
     const { buildApp } = await import('../../app')
     app = await buildApp()
-
-    const tenantRes = await app.inject({
-      method: 'POST',
-      url: '/api/v1/tenants',
-      payload: { name: 'Wiki Test Tenant', slug: `wiki-tenant-${Date.now()}` },
-    })
-    tenantId = (JSON.parse(tenantRes.body) as { data: { id: string } }).data.id
+    await app.ready()
+    // Reuse seeded tenant 3 — same as the other E2E describes in this file.
+    tenantId = TEST_TENANT_ID
   })
 
   afterAll(async () => {
