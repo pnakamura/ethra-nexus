@@ -1,31 +1,43 @@
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 91%;
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 91%;
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 91%;
+    --primary: 250 93% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 91%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 0 0% 13%;
+    --accent-foreground: 0 0% 91%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 13%;
+    --input: 0 0% 13%;
+    --ring: 250 93% 65%;
+    --radius: 0.5rem;
+  }
 }
 
-:root {
-  --color-bg: #0a0a0a;
-  --color-surface: #111111;
-  --color-border: #222222;
-  --color-text: #e8e8e8;
-  --color-muted: #666666;
-  --color-primary: #6d56fa;
-  --color-primary-hover: #5a44e8;
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
-  font-size: 16px;
-}
-
-body {
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: 'Inter', system-ui, sans-serif;
-  line-height: 1.5;
-  min-height: 100vh;
-}
-
-#root {
-  min-height: 100vh;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, sans-serif;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  #root {
+    min-height: 100vh;
+  }
 }
