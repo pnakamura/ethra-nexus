@@ -17,18 +17,18 @@ export function FeedbackSection({ agentId }: FeedbackSectionProps) {
   return (
     <div className="flex flex-col gap-4">
       {/* Summary */}
-      <div className="flex items-center gap-4 p-4 bg-secondary/50 rounded-lg">
+      <div className="flex items-center gap-4 p-4 border-hairline bg-secondary/40">
         <div className="text-center">
-          <p className="font-serif text-3xl font-semibold text-foreground">{avg.toFixed(1)}</p>
-          <p className="text-xs text-muted-foreground">média</p>
+          <p className="font-mono text-3xl font-semibold text-foreground tabular-nums">{avg.toFixed(1)}</p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">média</p>
         </div>
         <div className="flex-1">
           <div className="flex gap-0.5 mb-1">
             {[1, 2, 3, 4, 5].map((n) => (
-              <Star key={n} size={16} className={cn('fill-current', n <= Math.round(avg) ? 'text-yellow-400' : 'text-muted-foreground/30')} />
+              <Star key={n} size={16} className={cn('fill-current', n <= Math.round(avg) ? 'text-primary' : 'text-muted-foreground/30')} />
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">{data?.meta.total ?? 0} avaliações</p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{data?.meta.total ?? 0} avaliações</p>
         </div>
       </div>
 
@@ -36,14 +36,14 @@ export function FeedbackSection({ agentId }: FeedbackSectionProps) {
       {(data?.data.length ?? 0) === 0
         ? <p className="text-sm text-muted-foreground text-center py-4">Nenhum feedback ainda.</p>
         : data?.data.map((fb) => (
-          <div key={fb.id} className="border border-border rounded-lg p-4 mist-item">
+          <div key={fb.id} className="border-hairline p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex gap-0.5">
                 {[1, 2, 3, 4, 5].map((n) => (
-                  <Star key={n} size={13} className={cn('fill-current', n <= fb.rating ? 'text-yellow-400' : 'text-muted-foreground/30')} />
+                  <Star key={n} size={13} className={cn('fill-current', n <= fb.rating ? 'text-primary' : 'text-muted-foreground/30')} />
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground">{new Date(fb.created_at).toLocaleDateString('pt-BR')}</p>
+              <p className="font-mono text-[10px] text-muted-foreground tabular-nums">{new Date(fb.created_at).toLocaleDateString('pt-BR')}</p>
             </div>
             {fb.comment && <p className="text-sm text-foreground">{fb.comment}</p>}
           </div>

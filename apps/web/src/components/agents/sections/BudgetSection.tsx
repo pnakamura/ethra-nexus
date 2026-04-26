@@ -18,7 +18,7 @@ export function BudgetSection({ agentId }: BudgetSectionProps) {
   }
 
   const pct = budget?.percent_used ?? 0
-  const progressColor = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-yellow-500' : 'bg-accent'
+  const progressColor = pct >= 90 ? 'bg-destructive' : pct >= 75 ? 'bg-yellow-500' : 'bg-primary'
 
   const handleSave = () => {
     const val = parseFloat(limitInput)
@@ -32,33 +32,33 @@ export function BudgetSection({ agentId }: BudgetSectionProps) {
     <div className="flex flex-col gap-5">
       <div>
         <div className="flex justify-between items-baseline mb-2">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Gasto este mês</p>
-          <p className="font-serif text-lg font-semibold text-accent">
+          <p className="font-mono text-[10px] font-medium text-muted-foreground uppercase tracking-[0.12em]">Gasto este mês</p>
+          <p className="font-mono text-lg font-semibold text-primary tabular-nums">
             ${budget?.spent_usd.toFixed(2)}{' '}
-            <span className="text-sm font-sans font-normal text-muted-foreground">
+            <span className="text-sm font-normal text-muted-foreground">
               / ${budget?.limit_usd === 0 ? '∞' : budget?.limit_usd.toFixed(2)}
             </span>
           </p>
         </div>
-        <div className="h-2 bg-secondary rounded-full overflow-hidden mb-1.5">
-          <div className={cn('h-full rounded-full transition-all duration-700', progressColor)} style={{ width: `${Math.min(pct, 100)}%` }} />
+        <div className="h-1 bg-secondary overflow-hidden mb-1.5">
+          <div className={cn('h-full transition-all duration-700', progressColor)} style={{ width: `${Math.min(pct, 100)}%` }} />
         </div>
-        <p className="text-xs text-muted-foreground text-right">{pct.toFixed(1)}% utilizado</p>
+        <p className="font-mono text-[10px] text-muted-foreground text-right tabular-nums">{pct.toFixed(1)}% utilizado</p>
       </div>
 
-      <div className="p-3 border border-border rounded-lg text-sm text-muted-foreground">
+      <div className="p-3 border-hairline text-sm text-muted-foreground">
         <span className="font-medium text-foreground">Tokens:</span>{' '}
-        {budget?.tokens_used.toLocaleString('pt-BR')} este mês
+        <span className="font-mono tabular-nums">{budget?.tokens_used.toLocaleString('pt-BR')}</span> este mês
       </div>
 
       {budget?.throttled_at && (
-        <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+        <div className="p-3 bg-destructive/10 border border-destructive/20 text-sm text-destructive">
           Budget esgotado em {new Date(budget.throttled_at).toLocaleDateString('pt-BR')}
         </div>
       )}
 
       <div>
-        <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5">Limite mensal (USD)</label>
+        <label className="font-mono text-[10px] font-medium text-muted-foreground uppercase tracking-[0.12em] block mb-1.5">Limite mensal (USD)</label>
         {editing
           ? (
             <div className="flex gap-2">

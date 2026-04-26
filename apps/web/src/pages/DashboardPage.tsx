@@ -19,9 +19,10 @@ export function DashboardPage() {
   const month = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
 
   return (
-    <div className="mist-in">
+    <div>
       <div className="mb-7">
-        <h1 className="font-serif text-2xl font-semibold text-foreground mb-1">Dashboard</h1>
+        <div className="font-mono uppercase tracking-[0.15em] text-[10px] text-muted-foreground mb-1">ETHRA NEXUS · MISSION CONTROL</div>
+        <h1 className="text-2xl font-semibold text-foreground tracking-[-0.01em] mb-1">Dashboard</h1>
         <p className="text-sm text-muted-foreground capitalize">{month}</p>
       </div>
 

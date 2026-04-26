@@ -21,10 +21,10 @@ export function KpiCard({ label, value, subtitle, accent, loading }: KpiCardProp
     )
   }
   return (
-    <Card className="p-5">
+    <Card className="border-hairline p-4 shadow-none">
       <CardContent className="p-0">
-        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">{label}</p>
-        <p className={cn('font-serif text-3xl font-semibold leading-none mb-1.5', accent ? 'text-accent' : 'text-foreground')}>
+        <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground mb-2">{label}</p>
+        <p className={cn('font-mono text-3xl tabular-nums tracking-[-0.02em] leading-none mb-2', accent ? 'text-primary' : 'text-foreground')}>
           {value}
         </p>
         {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}

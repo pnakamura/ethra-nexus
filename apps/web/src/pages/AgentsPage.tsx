@@ -19,14 +19,15 @@ export function AgentsPage() {
   )
 
   return (
-    <div className="mist-in">
-      <div className="flex items-center justify-between mb-7">
+    <div>
+      <div className="flex items-end justify-between mb-7">
         <div>
-          <h1 className="font-serif text-2xl font-semibold text-foreground mb-1">Agentes</h1>
+          <div className="font-mono uppercase tracking-[0.15em] text-[10px] text-muted-foreground mb-1">ETHRA NEXUS · AGENTES</div>
+          <h1 className="text-2xl font-semibold text-foreground tracking-[-0.01em] mb-1">Agentes</h1>
           <p className="text-sm text-muted-foreground">{agents.length} agente{agents.length !== 1 ? 's' : ''} configurado{agents.length !== 1 ? 's' : ''}</p>
         </div>
-        <Button onClick={() => navigate('/agents/new')}>
-          <Plus size={16} className="mr-1.5" /> Novo agente
+        <Button onClick={() => navigate('/agents/new')} className="font-mono uppercase tracking-[0.1em]">
+          <Plus size={14} className="mr-1.5" /> NOVO AGENTE
         </Button>
       </div>
 
@@ -35,15 +36,15 @@ export function AgentsPage() {
           placeholder="Buscar por nome ou papel..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
+          className="max-w-xs font-mono"
         />
       </div>
 
-      <div className="border border-border rounded-xl overflow-hidden bg-card">
+      <div className="border-hairline overflow-hidden bg-card">
         {isLoading
           ? Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-5 py-4 border-b border-border last:border-b-0">
-                <Skeleton className="w-9 h-9 rounded-lg" />
+              <div key={i} className="flex items-center gap-4 px-5 py-4 border-b-hairline last:border-b-0">
+                <Skeleton className="w-9 h-9" />
                 <Skeleton className="h-4 w-40" />
                 <Skeleton className="h-4 w-20 ml-auto" />
               </div>
@@ -57,15 +58,15 @@ export function AgentsPage() {
           : filtered.map((agent) => (
               <div
                 key={agent.id}
-                className="flex items-center gap-4 px-5 py-4 border-b border-border last:border-b-0 hover:bg-accent/5 transition-colors cursor-pointer mist-item"
+                className="flex items-center gap-4 px-5 py-4 border-b-hairline last:border-b-0 hover:bg-secondary transition-colors cursor-pointer"
                 onClick={() => navigate(`/agents/${agent.id}`)}
               >
-                <div className="w-9 h-9 bg-accent/12 rounded-lg flex items-center justify-center text-base flex-shrink-0">
+                <div className="w-9 h-9 border-hairline flex items-center justify-center text-base flex-shrink-0">
                   🤖
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-serif text-sm font-medium text-foreground">{agent.name}</p>
-                  <p className="text-xs text-muted-foreground">{agent.role}</p>
+                  <p className="text-sm font-medium text-foreground">{agent.name}</p>
+                  <p className="font-mono text-[11px] text-muted-foreground">{agent.role}</p>
                 </div>
                 <AgentStatusBadge status={agent.status} />
                 <Button
