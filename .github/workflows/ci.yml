@@ -197,4 +197,12 @@ jobs:
           port: 22022
           script: |
             docker pull ghcr.io/pnakamura/ethra-nexus:latest
-            docker service update --force ethra-nexus_ethra-nexus-api
+            docker service update \
+              --image ghcr.io/pnakamura/ethra-nexus:latest \
+              --label-add 'traefik.enable=true' \
+              --label-add 'traefik.http.routers.ethra-nexus-ethra-nexus-api.rule=Host(`ethra-nexus-ethra-nexus-api.uzqtt7.easypanel.host`)' \
+              --label-add 'traefik.http.routers.ethra-nexus-ethra-nexus-api.entrypoints=websecure' \
+              --label-add 'traefik.http.routers.ethra-nexus-ethra-nexus-api.tls=true' \
+              --label-add 'traefik.http.services.ethra-nexus-ethra-nexus-api.loadbalancer.server.port=3000' \
+              --label-add 'traefik.docker.network=easypanel' \
+              ethra-nexus_ethra-nexus-api
