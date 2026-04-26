@@ -66,3 +66,4 @@ infra/vps/secrets/encrypted/
 
 # Git worktrees
 .worktrees/
+.superpowers
