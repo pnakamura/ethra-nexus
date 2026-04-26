@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Bot, BookOpen, Settings, LogOut, Moon, Sun, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { useTheme } from 'next-themes'
@@ -13,49 +13,27 @@ const NAV_ITEMS = [
   { to: '/settings',  icon: Settings,        label: 'Configurações',   group: 'SISTEMA' },
 ]
 
-const COOKIE_KEY = 'ethra.sidebar.expanded'
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
-const KEYBOARD_SHORTCUT = 'b'
-
-function readCookie(): boolean {
-  if (typeof document === 'undefined') return false
-  const match = document.cookie.match(new RegExp(`(?:^|; )${COOKIE_KEY}=([^;]*)`))
-  return match?.[1] === 'true'
+interface SidebarProps {
+  expanded: boolean
+  onToggle: (v: boolean) => void
 }
 
-function writeCookie(expanded: boolean): void {
-  document.cookie = `${COOKIE_KEY}=${expanded}; path=/; max-age=${COOKIE_MAX_AGE}`
-}
-
-export function Sidebar() {
-  const [expanded, setExpanded] = useState(false)
-  const initializedRef = useRef(false)
+export function Sidebar({ expanded, onToggle }: SidebarProps) {
   const { logout } = useAuth()
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
 
-  // Hydrate state from cookie on mount
-  useEffect(() => {
-    setExpanded(readCookie())
-    initializedRef.current = true
-  }, [])
-
-  // Persist expansion to cookie (skip first hydration render)
-  useEffect(() => {
-    if (initializedRef.current) writeCookie(expanded)
-  }, [expanded])
-
   // Keyboard shortcut: Cmd/Ctrl+B
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === KEYBOARD_SHORTCUT) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        setExpanded((v) => !v)
+        onToggle(!expanded)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [])
+  }, [expanded, onToggle])
 
   const handleLogout = () => {
     logout()
@@ -83,7 +61,7 @@ export function Sidebar() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    onClick={() => setExpanded(false)}
+                    onClick={() => onToggle(false)}
                     className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
                     aria-label="Recolher sidebar (Ctrl+B)"
                   >
@@ -97,7 +75,7 @@ export function Sidebar() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => setExpanded(true)}
+                  onClick={() => onToggle(true)}
                   className="w-full flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                   aria-label="Expandir sidebar (Ctrl+B)"
                 >
