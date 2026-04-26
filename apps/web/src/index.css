@@ -2,118 +2,153 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ETHRA APERTURE — Swiss / Brutalist Minimalist Design System
+   Branco + preto + cobalto absolutos. Hairline 0.5px. Radius 0. Zero ornament. */
+
 @layer base {
   :root {
-    --background: 45 33% 97%;
-    --foreground: 0 0% 20%;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
+
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 20%;
+    --card-foreground: 0 0% 0%;
+
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 20%;
-    --primary: 218 90% 45%;
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 240 100% 50%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 45 20% 93%;
-    --secondary-foreground: 0 0% 20%;
-    --muted: 45 20% 93%;
-    --muted-foreground: 0 0% 55%;
-    --accent: 218 90% 45%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 0%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 240 100% 50%;
     --accent-foreground: 0 0% 100%;
-    --accent-glow: 218 90% 45%;
-    --destructive: 0 84% 60%;
+
+    --destructive: 0 84% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 45 33% 88%;
-    --input: 45 33% 88%;
-    --ring: 218 90% 45%;
-    --radius: 0.5rem;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 240 100% 50%;
+
+    --radius: 0px;
+
+    --status-busy: 0 84% 50%;
+    --status-idle: 0 0% 60%;
+    --status-active: 142 70% 40%;
+
+    --hairline: 0 0% 90%;
+    --ink: 0 0% 0%;
+    --paper: 0 0% 100%;
   }
 
   .dark {
-    --background: 0 0% 8%;
-    --foreground: 45 33% 92%;
-    --card: 0 0% 11%;
-    --card-foreground: 45 33% 92%;
-    --popover: 0 0% 11%;
-    --popover-foreground: 45 33% 92%;
-    --primary: 218 80% 60%;
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+
+    --card: 0 0% 4%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 0 0% 4%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 240 100% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 45 33% 92%;
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 55%;
-    --accent: 218 80% 60%;
+
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 60%;
+
+    --accent: 240 100% 60%;
     --accent-foreground: 0 0% 100%;
-    --accent-glow: 218 80% 60%;
-    --destructive: 0 62% 50%;
+
+    --destructive: 0 84% 50%;
     --destructive-foreground: 0 0% 100%;
+
     --border: 0 0% 18%;
     --input: 0 0% 18%;
-    --ring: 218 80% 60%;
+    --ring: 240 100% 60%;
+
+    --status-busy: 0 84% 50%;
+    --status-idle: 0 0% 50%;
+    --status-active: 142 70% 50%;
+
+    --hairline: 0 0% 18%;
+    --ink: 0 0% 100%;
+    --paper: 0 0% 0%;
   }
 }
 
 @layer base {
-  * { @apply border-border; }
+  * {
+    @apply border-border;
+    border-width: 0;
+  }
+
+  html, body, #root { height: 100%; }
+
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', system-ui, sans-serif;
-    font-weight: 300;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.01em;
   }
-  h1, h2, h3 {
-    font-family: 'Playfair Display', Georgia, serif;
+
+  ::selection {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
   }
 }
 
-/* Paper grain overlay */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    radial-gradient(circle at 1px 1px, rgba(0,0,0,0.018) 1px, transparent 0),
-    radial-gradient(circle at 3px 3px, rgba(0,0,0,0.009) 1px, transparent 0);
-  background-size: 3px 3px, 7px 7px;
-  z-index: 9999;
+@layer utilities {
+  .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  /* Hairline 0.5px borders */
+  .border-hairline   { border-width: 0.5px; border-style: solid; border-color: hsl(var(--hairline)); }
+  .border-r-hairline { border-right:  0.5px solid hsl(var(--hairline)); }
+  .border-l-hairline { border-left:   0.5px solid hsl(var(--hairline)); }
+  .border-t-hairline { border-top:    0.5px solid hsl(var(--hairline)); }
+  .border-b-hairline { border-bottom: 0.5px solid hsl(var(--hairline)); }
+
+  /* Terminal-style block cursor */
+  .terminal-cursor::after {
+    content: '';
+    display: inline-block;
+    width: 0.6em;
+    height: 1em;
+    background: hsl(var(--ink));
+    vertical-align: -0.15em;
+    margin-left: 2px;
+    animation: cursor-blink 1.05s steps(1) infinite;
+  }
+
+  @keyframes cursor-blink { 50% { background: transparent; } }
+
+  /* Filament dot pulse */
+  @keyframes filament-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.6); opacity: 0.6; }
+  }
+  .filament-pulse { animation: filament-pulse 2.4s ease-in-out infinite; }
+
+  /* Custom scrollbar - minimal */
+  .scrollbar-minimal::-webkit-scrollbar { width: 4px; height: 4px; }
+  .scrollbar-minimal::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-minimal::-webkit-scrollbar-thumb { background: hsl(var(--hairline)); }
 }
 
-/* Animations */
-@keyframes halo-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--accent-glow) / 0.22); }
-  50%       { box-shadow: 0 0 0 5px hsl(var(--accent-glow) / 0.22); }
-}
-@keyframes mist-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes phantom {
-  from { opacity: 0; filter: blur(6px); }
-  to   { opacity: 1; filter: blur(0); }
-}
-
-.halo-pulse  { animation: halo-pulse 5s ease-in-out infinite; }
-.mist-in     { animation: mist-in 0.45s ease forwards; }
-.phantom     { animation: phantom 1.4s ease forwards; }
-
-/* Staggered list entrance */
-.mist-item:nth-child(1) { animation: mist-in 0.4s 0.05s ease both; }
-.mist-item:nth-child(2) { animation: mist-in 0.4s 0.10s ease both; }
-.mist-item:nth-child(3) { animation: mist-in 0.4s 0.15s ease both; }
-.mist-item:nth-child(4) { animation: mist-in 0.4s 0.20s ease both; }
-.mist-item:nth-child(5) { animation: mist-in 0.4s 0.25s ease both; }
-
-/* Cobalt underline for active nav */
-.cobalt-underline { position: relative; }
-.cobalt-underline::after {
-  content: '';
-  position: absolute;
-  left: 8px; right: 8px; bottom: 6px;
-  height: 2px;
-  background: hsl(var(--accent));
-  box-shadow: 0 0 8px hsl(var(--accent-glow) / 0.4);
-  border-radius: 1px;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 5px; }
+/* Default scrollbar (overrides previous warm version) */
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: hsl(var(--hairline)); }
