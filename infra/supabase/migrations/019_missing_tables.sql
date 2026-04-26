@@ -4,8 +4,18 @@
 -- tenants: add settings column (Drizzle schema uses settings, SQL used config)
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}';
 
--- agents: give wiki_scope a default so INSERT without it doesn't fail NOT NULL
-ALTER TABLE agents ALTER COLUMN wiki_scope SET DEFAULT '';
+-- agents: give wiki_scope a default so INSERT without it doesn't fail NOT NULL.
+-- Conditional: the column was removed from the Drizzle schema, so DBs bootstrapped
+-- from infra/vps/schema-drizzle.sql don't have it — skip the ALTER in that case.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='agents' AND column_name='wiki_scope'
+  ) THEN
+    ALTER TABLE agents ALTER COLUMN wiki_scope SET DEFAULT '';
+  END IF;
+END $$;
 
 -- agent_skills: discrete skill assignments per agent
 CREATE TABLE IF NOT EXISTS agent_skills (
