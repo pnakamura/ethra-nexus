@@ -29,46 +29,43 @@ export function SignupPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-[400px]">
+      <Card className="w-full max-w-[400px] border-hairline shadow-none">
         <CardHeader className="text-center pb-2">
-          <div className="flex items-center justify-center gap-2.5 mb-4">
-            <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
-              <span className="text-accent-foreground text-sm font-bold">EN</span>
-            </div>
-            <span className="font-serif text-xl font-semibold text-foreground phantom">Ethra Nexus</span>
+          <div className="font-mono uppercase tracking-[0.2em] text-base font-semibold text-foreground mb-2">
+            ETHRA NEXUS
           </div>
-          <p className="text-sm text-muted-foreground">Criar nova conta</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Criar nova conta</p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
             <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5">Nome da organização</label>
+              <label className="font-mono text-[10px] font-medium text-muted-foreground uppercase tracking-[0.12em] block mb-1.5">Nome da organização</label>
               <Input {...register('name')} placeholder="Minha Empresa" autoFocus />
               {errors.name && <p className="text-xs text-destructive mt-1">{errors.name.message}</p>}
             </div>
             <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5">Slug (URL)</label>
-              <Input {...register('slug')} placeholder="minha-empresa" />
+              <label className="font-mono text-[10px] font-medium text-muted-foreground uppercase tracking-[0.12em] block mb-1.5">Slug (URL)</label>
+              <Input {...register('slug')} placeholder="minha-empresa" className="font-mono" />
               <p className="text-[11px] text-muted-foreground mt-1">Apenas minúsculas, números e hífens</p>
               {errors.slug && <p className="text-xs text-destructive mt-1">{errors.slug.message}</p>}
             </div>
             <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5">Senha</label>
-              <Input {...register('password')} type="password" placeholder="Mínimo 8 caracteres" />
+              <label className="font-mono text-[10px] font-medium text-muted-foreground uppercase tracking-[0.12em] block mb-1.5">Senha</label>
+              <Input {...register('password')} type="password" placeholder="Mínimo 8 caracteres" className="font-mono" />
               {errors.password && <p className="text-xs text-destructive mt-1">{errors.password.message}</p>}
             </div>
             <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5">Confirmar senha</label>
-              <Input {...register('confirmPassword')} type="password" placeholder="••••••••" />
+              <label className="font-mono text-[10px] font-medium text-muted-foreground uppercase tracking-[0.12em] block mb-1.5">Confirmar senha</label>
+              <Input {...register('confirmPassword')} type="password" placeholder="••••••••" className="font-mono" />
               {errors.confirmPassword && <p className="text-xs text-destructive mt-1">{errors.confirmPassword.message}</p>}
             </div>
-            <Button type="submit" className="w-full mt-1" disabled={isSubmitting}>
+            <Button type="submit" className="w-full mt-1 font-mono uppercase tracking-[0.12em]" disabled={isSubmitting}>
               {isSubmitting ? 'Criando...' : 'Criar conta'}
             </Button>
           </form>
           <p className="text-xs text-center text-muted-foreground mt-4">
             Já tem conta?{' '}
-            <Link to="/login" className="text-accent hover:underline font-medium">Entrar</Link>
+            <Link to="/login" className="text-primary hover:underline font-medium">Entrar</Link>
           </p>
         </CardContent>
       </Card>

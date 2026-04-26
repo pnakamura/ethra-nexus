@@ -27,22 +27,22 @@ export function AgentDetailPage() {
   const setSection = (s: string) => navigate({ hash: s }, { replace: true })
 
   return (
-    <div className="mist-in">
-      <button onClick={() => navigate('/agents')} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-5 transition-colors">
-        <ArrowLeft size={14} /> Voltar para agentes
+    <div>
+      <button onClick={() => navigate('/agents')} className="flex items-center gap-1.5 font-mono uppercase tracking-[0.12em] text-xs text-muted-foreground hover:text-foreground mb-5 transition-colors">
+        <ArrowLeft size={12} /> AGENTES
       </button>
 
       {/* Agent header */}
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 bg-accent/12 rounded-xl flex items-center justify-center text-lg flex-shrink-0">
+        <div className="w-10 h-10 border-hairline flex items-center justify-center text-lg flex-shrink-0">
           🤖
         </div>
         <div className="flex-1">
           {isLoading
             ? <><Skeleton className="h-5 w-44 mb-1.5" /><Skeleton className="h-3.5 w-24" /></>
             : <>
-                <h1 className="font-serif text-xl font-semibold text-foreground">{agent?.name}</h1>
-                <p className="text-xs text-muted-foreground">{agent?.role}</p>
+                <h1 className="text-xl font-semibold text-foreground tracking-[-0.01em]">{agent?.name}</h1>
+                <p className="font-mono text-[11px] text-muted-foreground">{agent?.role}</p>
               </>
           }
         </div>
@@ -50,18 +50,18 @@ export function AgentDetailPage() {
       </div>
 
       {/* Split layout */}
-      <div className="border border-border rounded-xl bg-card overflow-hidden flex min-h-[480px]">
+      <div className="border-hairline bg-card overflow-hidden flex min-h-[480px]">
         {/* Section nav */}
-        <nav className="w-[160px] min-w-[160px] border-r border-border p-2 flex flex-col gap-0.5">
+        <nav className="w-[180px] min-w-[180px] border-r-hairline p-2 flex flex-col gap-0.5">
           {SECTIONS.map(({ id: sid, label, icon: Icon }) => (
             <button
               key={sid}
               onClick={() => setSection(sid)}
               className={cn(
-                'flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] transition-colors text-left',
+                'flex items-center gap-2.5 px-3 py-2 text-[13px] transition-colors text-left border-l-2',
                 activeSection === sid
-                  ? 'bg-accent/10 text-accent font-medium'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/6',
+                  ? 'bg-secondary text-foreground border-l-primary font-medium'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary border-l-transparent',
               )}
             >
               <Icon size={14} className="flex-shrink-0" />

@@ -26,13 +26,14 @@ export function AgentNewPage() {
   }
 
   return (
-    <div className="mist-in max-w-2xl">
-      <button onClick={() => navigate('/agents')} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors">
-        <ArrowLeft size={14} /> Voltar para agentes
+    <div className="max-w-2xl">
+      <button onClick={() => navigate('/agents')} className="flex items-center gap-1.5 font-mono uppercase tracking-[0.12em] text-xs text-muted-foreground hover:text-foreground mb-6 transition-colors">
+        <ArrowLeft size={12} /> AGENTES
       </button>
-      <h1 className="font-serif text-2xl font-semibold text-foreground mb-6">Novo agente</h1>
+      <div className="font-mono uppercase tracking-[0.15em] text-[10px] text-muted-foreground mb-1">ETHRA NEXUS · NOVO AGENTE</div>
+      <h1 className="text-2xl font-semibold text-foreground tracking-[-0.01em] mb-6">Novo agente</h1>
 
-      <Card>
+      <Card className="border-hairline shadow-none">
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
             <div className="grid grid-cols-2 gap-4">

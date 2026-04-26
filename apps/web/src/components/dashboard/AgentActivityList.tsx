@@ -20,46 +20,52 @@ export function AgentActivityList({ agents, loading }: AgentActivityListProps) {
   const navigate = useNavigate()
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <h2 className="font-serif text-base font-semibold text-foreground">Agentes recentes</h2>
+    <Card className="border-hairline shadow-none">
+      <CardHeader className="pb-3 border-b-hairline">
+        <h2 className="font-mono uppercase tracking-[0.12em] text-xs text-muted-foreground">Agent Roster</h2>
       </CardHeader>
       <CardContent className="p-0">
         {loading
           ? Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-5 py-3 border-t border-border first:border-t-0">
-                <Skeleton className="w-9 h-9 rounded-lg" />
+              <div key={i} className="flex items-center gap-3 px-4 py-3 border-t-hairline first:border-t-0">
+                <Skeleton className="w-8 h-8" />
                 <div className="flex-1">
                   <Skeleton className="h-3.5 w-36 mb-1.5" />
                   <Skeleton className="h-3 w-24" />
                 </div>
-                <Skeleton className="h-5 w-12 rounded-full" />
+                <Skeleton className="h-4 w-16" />
               </div>
             ))
-          : agents.map((agent) => (
-              <div
-                key={agent.id}
-                className="flex items-center gap-3 px-5 py-3 border-t border-border first:border-t-0 cursor-pointer hover:bg-accent/5 transition-colors mist-item"
-                onClick={() => navigate(`/agents/${agent.id}`)}
-              >
-                <div className="w-9 h-9 bg-accent/12 rounded-lg flex items-center justify-center text-base">
-                  🤖
+          : agents.map((agent) => {
+              const isActive = agent.status === 'active'
+              return (
+                <div
+                  key={agent.id}
+                  className="flex items-center gap-3 px-4 py-3 border-t-hairline first:border-t-0 cursor-pointer hover:bg-secondary transition-colors"
+                  onClick={() => navigate(`/agents/${agent.id}`)}
+                >
+                  <div className="w-8 h-8 bg-secondary flex items-center justify-center text-sm">
+                    🤖
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{agent.name}</p>
+                    <p className="font-mono text-[10px] text-muted-foreground truncate">
+                      {agent.skills.slice(0, 2).join(' · ')}
+                    </p>
+                  </div>
+                  <span className={cn(
+                    'inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.18em]',
+                    isActive ? 'text-foreground' : 'text-muted-foreground',
+                  )}>
+                    <span
+                      className={cn('size-1.5 rounded-full', isActive && 'filament-pulse')}
+                      style={{ background: isActive ? 'hsl(var(--status-active))' : 'hsl(var(--status-idle))' }}
+                    />
+                    {isActive ? 'ACTIVE' : 'IDLE'}
+                  </span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-serif text-sm font-medium text-foreground truncate">{agent.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{agent.skills.slice(0, 2).join(' · ')}</p>
-                </div>
-                <span className={cn(
-                  'inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full',
-                  agent.status === 'active'
-                    ? 'bg-green-500/10 text-green-700 border border-green-500/20 halo-pulse'
-                    : 'bg-yellow-500/10 text-yellow-700 border border-yellow-500/20',
-                )}>
-                  {agent.status === 'active' && <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />}
-                  {agent.status === 'active' ? 'Ativo' : 'Pausado'}
-                </span>
-              </div>
-            ))}
+              )
+            })}
       </CardContent>
     </Card>
   )

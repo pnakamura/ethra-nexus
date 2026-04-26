@@ -6,13 +6,14 @@ export function AgentStatusBadge({ status }: AgentStatusBadgeProps) {
   const isActive = status === 'active'
   return (
     <span className={cn(
-      'inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border',
-      isActive
-        ? 'bg-green-500/10 text-green-700 border-green-500/20 halo-pulse'
-        : 'bg-yellow-500/10 text-yellow-700 border-yellow-500/20',
+      'inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.18em] px-2 py-0.5 border-hairline',
+      isActive ? 'text-foreground' : 'text-muted-foreground',
     )}>
-      {isActive && <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />}
-      {isActive ? 'Ativo' : 'Pausado'}
+      <span
+        className={cn('size-1.5 rounded-full', isActive && 'filament-pulse')}
+        style={{ background: isActive ? 'hsl(var(--status-active))' : 'hsl(var(--status-idle))' }}
+      />
+      {isActive ? 'ACTIVE' : 'IDLE'}
     </span>
   )
 }
