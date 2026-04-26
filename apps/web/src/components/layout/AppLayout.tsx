@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
+import { TopHeader } from './TopHeader'
 
 const COOKIE_KEY = 'ethra.sidebar.expanded'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -31,8 +32,9 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar expanded={expanded} onToggle={setExpanded} />
+      <TopHeader expanded={expanded} />
       <main
-        className="flex-1 min-w-0 p-8 transition-[margin-left] duration-200 ease-out"
+        className="flex-1 min-w-0 p-8 pt-[calc(56px+2rem)] transition-[margin-left] duration-200 ease-out"
         style={{ marginLeft: expanded ? 220 : 60 }}
       >
         <Outlet />
