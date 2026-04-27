@@ -1,11 +1,13 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, User, Code2, BookOpen, DollarSign, Star } from 'lucide-react'
+import { ArrowLeft, User, Code2, BookOpen, DollarSign, Star, Clock, Play } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AgentStatusBadge } from '@/components/agents/AgentStatusBadge'
 import { IdentitySection } from '@/components/agents/sections/IdentitySection'
 import { SkillsSection } from '@/components/agents/sections/SkillsSection'
 import { BudgetSection } from '@/components/agents/sections/BudgetSection'
 import { FeedbackSection } from '@/components/agents/sections/FeedbackSection'
+import { SchedulesSection } from '@/components/agents/sections/SchedulesSection'
+import { ExecuteSection } from '@/components/agents/sections/ExecuteSection'
 import { SplitLayout } from '@/components/layout/SplitLayout'
 import { ExecutionLogPanel } from '@/components/panels/ExecutionLogPanel'
 import { HitlPanel } from '@/components/panels/HitlPanel'
@@ -13,11 +15,13 @@ import { useAgent } from '@/hooks/useAgent'
 import { cn } from '@/lib/utils'
 
 const SECTIONS = [
-  { id: 'identity', label: 'Identidade', icon: User },
-  { id: 'skills',   label: 'Skills',     icon: Code2 },
-  { id: 'wiki',     label: 'Wiki',       icon: BookOpen },
-  { id: 'budget',   label: 'Budget',     icon: DollarSign },
-  { id: 'feedback', label: 'Feedback',   icon: Star },
+  { id: 'identity',   label: 'Identidade', icon: User },
+  { id: 'skills',     label: 'Skills',     icon: Code2 },
+  { id: 'wiki',       label: 'Wiki',       icon: BookOpen },
+  { id: 'budget',     label: 'Budget',     icon: DollarSign },
+  { id: 'feedback',   label: 'Feedback',   icon: Star },
+  { id: 'schedules',  label: 'Schedules',  icon: Clock },
+  { id: 'execute',    label: 'Executar',   icon: Play },
 ]
 
 export function AgentDetailPage() {
@@ -106,6 +110,8 @@ export function AgentDetailPage() {
                     )}
                     {activeSection === 'budget'   && <BudgetSection agentId={agent.id} />}
                     {activeSection === 'feedback' && <FeedbackSection agentId={agent.id} />}
+                    {activeSection === 'schedules' && <SchedulesSection agentId={agent.id} />}
+                    {activeSection === 'execute'   && <ExecuteSection agentId={agent.id} />}
                   </>
                 : null
               }
