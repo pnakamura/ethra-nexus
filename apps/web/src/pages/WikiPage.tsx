@@ -88,7 +88,7 @@ function WikiIndexTab() {
 function WikiSearchTab() {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
-  const { data: results = [], isLoading, isFetching } = useWikiSearch(query)
+  const { data: results = [], isFetching } = useWikiSearch(query)
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
