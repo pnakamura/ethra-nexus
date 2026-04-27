@@ -411,6 +411,29 @@ export async function wikiRoutes(app: FastifyInstance) {
     return result
   })
 
+  // ── GET /wiki/pages ───────────────────────────────────────
+  app.get('/wiki/pages', async (request) => {
+    const result = await getDb().execute(
+      sql`SELECT id, slug, title, type, confidence, status, author_type, updated_at
+          FROM wiki_strategic_pages
+          WHERE tenant_id = ${request.tenantId}
+          ORDER BY updated_at DESC`,
+    )
+    return { data: result.rows }
+  })
+
+  // ── GET /wiki/agent-pages/:agentId ────────────────────────
+  app.get<{ Params: { agentId: string } }>('/wiki/agent-pages/:agentId', async (request) => {
+    const result = await getDb().execute(
+      sql`SELECT id, slug, title, type, confidence, status, origin, updated_at
+          FROM wiki_agent_pages
+          WHERE tenant_id = ${request.tenantId}
+            AND agent_id = ${request.params.agentId}
+          ORDER BY updated_at DESC`,
+    )
+    return { data: result.rows }
+  })
+
   // ── POST /wiki/pages/:id/reembed ──────────────────────────
   app.post<{ Params: { id: string } }>(
     '/wiki/pages/:id/reembed',

@@ -11,6 +11,30 @@ export interface WikiSearchResult {
   similarity: number
 }
 
+export interface WikiPageItem {
+  id: string
+  slug: string
+  title: string
+  type: string
+  confidence: string
+  status: string
+  author_type?: string
+  origin?: string
+  updated_at: string
+}
+
+export interface WikiApproval {
+  id: string
+  agent_id: string
+  slug: string
+  title: string
+  content: string
+  type: string
+  target_wiki: string
+  status: string
+  created_at: string
+}
+
 export interface IngestResult {
   source_id: string
   pages_extracted: number
@@ -27,6 +51,24 @@ export function useWikiIndex() {
   })
 }
 
+export function useWikiPages() {
+  return useQuery({
+    queryKey: ['wiki', 'pages', 'strategic'],
+    queryFn: () => api.get<{ data: WikiPageItem[] }>('/wiki/pages').then(r => r.data.data),
+    staleTime: 15_000,
+  })
+}
+
+export function useWikiAgentPages(agentId: string | null) {
+  return useQuery({
+    queryKey: ['wiki', 'pages', 'agent', agentId],
+    queryFn: () =>
+      api.get<{ data: WikiPageItem[] }>(`/wiki/agent-pages/${agentId!}`).then(r => r.data.data),
+    enabled: agentId !== null,
+    staleTime: 15_000,
+  })
+}
+
 export function useWikiSearch(query: string) {
   return useQuery({
     queryKey: ['wiki', 'search', query],
@@ -37,6 +79,41 @@ export function useWikiSearch(query: string) {
   })
 }
 
+export function useWikiApprovals() {
+  return useQuery({
+    queryKey: ['wiki', 'approvals'],
+    queryFn: () =>
+      api.get<{ data: WikiApproval[] }>('/wiki/agent-writes/pending').then(r => r.data.data),
+    staleTime: 10_000,
+  })
+}
+
+export function useApproveWrite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/wiki/agent-writes/${id}/approve`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['wiki', 'approvals'] })
+      qc.invalidateQueries({ queryKey: ['wiki', 'pages'] })
+      toast.success('Proposta aprovada e promovida para a wiki')
+    },
+    onError: () => toast.error('Erro ao aprovar proposta'),
+  })
+}
+
+export function useRejectWrite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post(`/wiki/agent-writes/${id}/reject`, { reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['wiki', 'approvals'] })
+      toast.success('Proposta rejeitada')
+    },
+    onError: () => toast.error('Erro ao rejeitar proposta'),
+  })
+}
+
 export function useWikiIngest() {
   const qc = useQueryClient()
   return useMutation({
@@ -44,6 +121,7 @@ export function useWikiIngest() {
       api.post<IngestResult>('/wiki/ingest', { ...body, source_origin: 'api' }).then(r => r.data),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['wiki', 'index'] })
+      qc.invalidateQueries({ queryKey: ['wiki', 'pages'] })
       toast.success(`Ingestão concluída: ${result.pages_persisted} página(s) salvas`)
     },
     onError: () => toast.error('Erro na ingestão'),
