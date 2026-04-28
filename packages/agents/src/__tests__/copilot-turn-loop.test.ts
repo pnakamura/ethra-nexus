@@ -275,3 +275,73 @@ describe('executeCopilotTurn — with tools', () => {
     expect(mockUpsertBudget).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('executeCopilotTurn — caps', () => {
+  let sseEvents: Array<{ type: string; [k: string]: unknown }>
+  let sse: { write: (e: object) => void }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sseEvents = []
+    sse = { write: (e) => sseEvents.push(e as { type: string }) }
+    let n = 0
+    mockInsert.mockImplementation(() => ({
+      values: vi.fn().mockReturnValue({
+        returning: vi.fn().mockImplementation(() => Promise.resolve([{ id: `m-${++n}` }])),
+      }),
+    }))
+    mockUpdate.mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) })
+    mockSelect.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ orderBy: vi.fn().mockResolvedValue([]) }),
+      }),
+    })
+    // Budget allows — caps test what happens after that
+    mockCanExecute.mockResolvedValue({ allowed: true })
+    mockLogProviderUsage.mockResolvedValue(undefined)
+    mockUpsertBudget.mockResolvedValue(undefined)
+  })
+
+  it('TURN_TOOLS_EXCEEDED when more than MAX_TOOLS tool_use in single message', async () => {
+    process.env['COPILOT_MAX_TOOLS_PER_TURN'] = '2'
+    mockStream.mockResolvedValueOnce({
+      [Symbol.asyncIterator]: async function* () {
+        for (let i = 0; i < 3; i++) {
+          yield { type: 'content_block_start', index: i, content_block: { type: 'tool_use', id: `t${i}`, name: 'test:noop', input: {} } }
+          yield { type: 'content_block_stop', index: i }
+        }
+        yield { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 1, output_tokens: 1 } }
+      },
+    })
+    const toolsModule = await import('../lib/copilot/tools')
+    vi.spyOn(toolsModule, 'findToolByName').mockReturnValue({
+      name: 'test:noop', description: '', input_schema: { type: 'object' },
+      permission: 'all_members', handler: async () => ({}),
+    } as never)
+
+    await executeCopilotTurn({ ...baseParams, sse, abortSignal: new AbortController().signal })
+
+    const errors = sseEvents.filter(e => e.type === 'error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]?.['code']).toBe('TURN_TOOLS_EXCEEDED')
+    delete process.env['COPILOT_MAX_TOOLS_PER_TURN']
+  })
+
+  it('TURN_COST_EXCEEDED when accumulated cost passes cap', async () => {
+    process.env['COPILOT_MAX_COST_PER_TURN_USD'] = '0.0001'  // tiny
+    mockStream.mockResolvedValueOnce({
+      [Symbol.asyncIterator]: async function* () {
+        yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
+        yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'big' } }
+        yield { type: 'content_block_stop', index: 0 }
+        yield { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 10000, output_tokens: 10000 } }
+      },
+    })
+
+    await executeCopilotTurn({ ...baseParams, sse, abortSignal: new AbortController().signal })
+
+    const errors = sseEvents.filter(e => e.type === 'error')
+    expect(errors.some(e => e['code'] === 'TURN_COST_EXCEEDED')).toBe(true)
+    delete process.env['COPILOT_MAX_COST_PER_TURN_USD']
+  })
+})

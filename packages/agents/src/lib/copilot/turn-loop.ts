@@ -11,6 +11,13 @@ const MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS = 4000
 const ESTIMATED_COST_PER_TURN = 0.05
 
+function maxToolsPerTurn(): number {
+  return parseInt(process.env['COPILOT_MAX_TOOLS_PER_TURN'] ?? '10', 10)
+}
+function maxCostPerTurnUsd(): number {
+  return parseFloat(process.env['COPILOT_MAX_COST_PER_TURN_USD'] ?? '0.50')
+}
+
 type TextBlock = { type: 'text'; text: string }
 type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
 type ToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
@@ -221,9 +228,26 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
       step.tokens_in + step.tokens_out,
     )
 
+    // Check cost cap AFTER tracking (so the step that crossed the cap is still recorded)
+    if (totalCost > maxCostPerTurnUsd()) {
+      p.sse.write({ type: 'error', code: 'TURN_COST_EXCEEDED', message: `Turno excedeu orçamento de $${maxCostPerTurnUsd()} USD.` })
+      await db.update(copilotMessages).set({ stop_reason: 'turn_cap_exceeded' }).where(eq(copilotMessages.id, assistantMessageId))
+      lastStopReason = 'turn_cap_exceeded'
+      break
+    }
+
     history = [...history, { role: 'assistant', content: step.blocks }]
 
     if (step.stop_reason !== 'tool_use') break
+
+    // Check tool count cap BEFORE executing this batch
+    const blocksToolCount = step.blocks.filter(b => b.type === 'tool_use').length
+    if (toolCallCount + blocksToolCount > maxToolsPerTurn()) {
+      p.sse.write({ type: 'error', code: 'TURN_TOOLS_EXCEEDED', message: `Turno excedeu ${maxToolsPerTurn()} chamadas de tool.` })
+      await db.update(copilotMessages).set({ stop_reason: 'turn_cap_exceeded' }).where(eq(copilotMessages.id, assistantMessageId))
+      lastStopReason = 'turn_cap_exceeded'
+      break
+    }
 
     // Execute each tool_use block
     const toolResultBlocks: ToolResultBlock[] = []
