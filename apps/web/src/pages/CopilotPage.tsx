@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ConversationsSidebar } from '@/components/copilot/ConversationsSidebar'
 import { ChatView } from '@/components/copilot/ChatView'
 import { ToolCallsLog } from '@/components/copilot/ToolCallsLog'
+import { EmptyState } from '@/components/copilot/EmptyState'
 import { useCopilotConversation, useSendCopilotMessage } from '@/hooks/useCopilot'
 
 export function CopilotPage() {
@@ -19,9 +20,7 @@ export function CopilotPage() {
       {selectedId ? (
         <ChatView conversationId={selectedId} />
       ) : (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground">
-          <p className="text-sm">Selecione uma conversa ou crie uma nova.</p>
-        </div>
+        <EmptyState onSelectConversation={setSelectedId} />
       )}
 
       <ToolCallsLog
