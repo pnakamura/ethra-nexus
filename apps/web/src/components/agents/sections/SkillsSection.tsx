@@ -47,7 +47,7 @@ export function SkillsSection({ agentId }: SkillsSectionProps) {
             </div>
             <Switch
               checked={skill.enabled}
-              onCheckedChange={(enabled) => updateSkill.mutate({ skillId: skill.id, enabled })}
+              onCheckedChange={(enabled) => updateSkill.mutate({ skillName: skill.skill_name, enabled })}
             />
           </div>
         ))}

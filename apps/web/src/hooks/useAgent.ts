@@ -37,8 +37,8 @@ export function useAgentSkills(id: string) {
 export function useUpdateAgentSkill(agentId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ skillId, enabled }: { skillId: string; enabled: boolean }) =>
-      api.patch(`/agents/${agentId}/skills/${skillId}`, { enabled }),
+    mutationFn: ({ skillName, enabled }: { skillName: string; enabled: boolean }) =>
+      api.patch(`/agents/${agentId}/skills/${skillName}`, { enabled }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agents', agentId, 'skills'] })
       toast.success('Skill atualizada')
@@ -50,12 +50,17 @@ export function useUpdateAgentSkill(agentId: string) {
 export function useAddAgentSkill(agentId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (skill_name: string) =>
-      api.post(`/agents/${agentId}/skills`, { skill_name }),
+    mutationFn: (skill_id: string) =>
+      api.post(`/agents/${agentId}/skills`, { skill_id }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agents', agentId, 'skills'] })
       toast.success('Skill adicionada')
     },
-    onError: () => toast.error('Erro ao adicionar skill'),
+    onError: (err: unknown) => {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+        'Erro ao adicionar skill'
+      toast.error(msg)
+    },
   })
 }
