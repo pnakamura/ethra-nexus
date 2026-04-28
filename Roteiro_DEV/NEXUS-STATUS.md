@@ -1,6 +1,6 @@
 # NEXUS-STATUS.md — Estado de Implementação
 
-> Documento vivo: reflete o estado real do codebase em 27 de Abril de 2026.
+> Documento vivo: reflete o estado real do codebase em 28 de Abril de 2026.
 > Atualizar sempre que uma fase for concluída.
 
 ---
@@ -13,10 +13,31 @@
 | Banco de dados (PostgreSQL + pgvector) | ✅ 19+ tabelas, 11 migrations aplicadas em prod |
 | AIOS Master (orquestrador) | ✅ Completo com multi-agent orchestration |
 | Skills built-in | ✅ 10/10 implementadas |
-| Testes backend | ✅ 102+ passing, 0 failing |
+| **Spec #1 — AIOS Master Agent (shell conversacional)** | ✅ **shipped no branch `feature/copilot-aios-master-shell` (33 commits, último f91f19c)** |
+| Testes backend | ✅ 118 passing em packages/agents (1 file pre-existing failure: cron-utils dep faltando) |
 | CI/CD pipeline | ⚠️ CI falhando desde commit 3926144 — bloqueia Docker/VPS, não afeta Vercel |
 | VPS (backend) | ✅ Rodando — última imagem: commit 0165c77 (pré-Sprint A) |
 | Frontend (apps/web) | ✅ MVP + Sprint A em produção no Vercel |
+
+---
+
+## Spec #1 (AIOS Master Agent shell) — entregas
+
+Branch: `feature/copilot-aios-master-shell` (33 commits, todos verdes nos respectivos task-runs)
+
+| Camada | Entregas |
+|--------|----------|
+| DB | Migration 021 (3 tabelas + RLS + CHECK + trigger), Migration 022 (seed aios-master), Drizzle schema |
+| Tools | 9 read-only tools: list_agents, get_recent_events, explain_event, get_budget_status, cost_breakdown (3 group_by), agent_health, list_pending_approvals, wiki_query, list_storage_alerts (stub) |
+| Orchestration | Turn loop multi-step com Anthropic Tool Use, budget tracking integrado (canExecute/logProviderUsage/upsertBudget), per-turn caps (cost + tools, env-configurable), auto-title via Haiku |
+| API | Admin-only middleware, 5 conversation CRUD endpoints, SSE message endpoint com abort handling |
+| Frontend | `/copilot` route, ConversationsSidebar, ChatView+MessageList+bubbles, MessageInput, ToolCallsLog, EmptyState com chips |
+| Audit & Docs | Karpathy principles audit, Spec #1 design doc, plan com Task 17.5 (budget integration fix) |
+
+**Pendências antes de prod**:
+- Aplicar migrations 021+022 em DB de dev/stage e validar schema
+- Smoke test manual do `/copilot` end-to-end (rodar `npm run dev`, criar thread, mandar mensagem, ver streaming)
+- Merge para main + push para GHCR + service update (workflow padrão da casa)
 
 ---
 
