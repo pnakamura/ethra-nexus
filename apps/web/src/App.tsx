@@ -8,6 +8,7 @@ import { AgentsPage } from '@/pages/AgentsPage'
 import { AgentNewPage } from '@/pages/AgentNewPage'
 import { AgentDetailPage } from '@/pages/AgentDetailPage'
 import { WikiPage } from '@/pages/WikiPage'
+import { OrchestratorPage } from '@/pages/OrchestratorPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/agents/new" element={<AgentNewPage />} />
           <Route path="/agents/:id" element={<AgentDetailPage />} />
           <Route path="/wiki" element={<WikiPage />} />
+          <Route path="/orchestrator" element={<OrchestratorPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>

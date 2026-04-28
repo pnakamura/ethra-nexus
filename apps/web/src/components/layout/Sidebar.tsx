@@ -1,16 +1,17 @@
 import { useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Bot, BookOpen, Settings, LogOut, Moon, Sun, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { LayoutDashboard, Bot, BookOpen, Settings, LogOut, Moon, Sun, PanelLeftClose, PanelLeft, Activity } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useAuth } from '@/contexts/AuthContext'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Mission Control', group: 'SISTEMA' },
-  { to: '/agents',    icon: Bot,             label: 'Agentes',         group: 'SISTEMA' },
-  { to: '/wiki',      icon: BookOpen,        label: 'Wiki',            group: 'MEMÓRIA' },
-  { to: '/settings',  icon: Settings,        label: 'Configurações',   group: 'SISTEMA' },
+  { to: '/dashboard',    icon: LayoutDashboard, label: 'Mission Control', group: 'SISTEMA' },
+  { to: '/orchestrator', icon: Activity,        label: 'Orquestrador',   group: 'SISTEMA' },
+  { to: '/agents',       icon: Bot,             label: 'Agentes',        group: 'SISTEMA' },
+  { to: '/wiki',         icon: BookOpen,        label: 'Wiki',           group: 'MEMÓRIA' },
+  { to: '/settings',     icon: Settings,        label: 'Configurações',  group: 'SISTEMA' },
 ]
 
 interface SidebarProps {
