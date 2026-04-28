@@ -3,9 +3,11 @@
 > **Spec #1 de 5** na trilha que termina com o critério de aceite "xlsx → HTML dashboard end-to-end".
 > Specs subsequentes (em ordem): #2 File Storage + Alerts · #3 Input Worker + Parsers · #4 Output Worker + HTML Dashboard · #5 Integração E2E.
 
-**Data**: 2026-04-27
+**Data**: 2026-04-27 (revisado em 2026-04-28 após audit do codebase)
 **Autor**: Paulo Nakamura (com Claude)
-**Status**: Approved for plan writing
+**Status**: Approved for implementation (with audit revisions)
+
+> **Audit 2026-04-28**: depois das Tasks 1-2 entrarem em review, descoberto que JWT da casa contém apenas `{ tenantId, email, role }` (sem `sub`) e `tenant_members` table não é queryable pelo app. Modelo de permission simplificado para **admin-only no MVP**. Per-user opt-in deferido. Detalhes técnicos no `## Audit decision log` do plano.
 
 ---
 
@@ -19,7 +21,7 @@ Criar um **agente conversacional read-only** chamado AIOS Master que serve como 
 - Click em "Quais agentes estão ativos?" cria thread, dispara turno, agente chama `system:list_agents` e responde com lista.
 - Streaming visível: texto aparece progressivamente, tool calls aparecem no painel direito com duração.
 - Thread persiste após reload, ganha auto-título (~2s após 1º turno).
-- Member sem `copilot_enabled` recebe 403.
+- Usuário não-admin (JWT.role !== 'admin') recebe 403 ao acessar `/copilot`.
 - Per-turn caps funcionam (10 tool calls / $0.50 USD).
 - Cobertura de testes ≥80% nos arquivos novos do backend.
 - Smoke test manual de aceite (lista na seção Testing) passa em todos os 11 itens.
@@ -30,7 +32,7 @@ Criar um **agente conversacional read-only** chamado AIOS Master que serve como 
 - Sidepanel global / contextual chat → Spec separado futuro
 - Attachments na chat (xlsx upload, etc.) → Specs #2 + #3
 - Output artifacts inline (HTML dashboard, PDF) → Spec #4
-- UI de toggle do `copilot_enabled` → defer até 2º membro existir
+- UI de toggle do `copilot_enabled` → defer até JWT ter user identity ('sub') real
 - MCP exposure → Fase D (não-prevista)
 - Mobile/responsive → desktop-first como resto do app
 - Stop generation button (cancel mid-stream) → defer
@@ -47,7 +49,7 @@ Criar um **agente conversacional read-only** chamado AIOS Master que serve como 
 | Q3 | UI shape | Página dedicada `/copilot` seguindo padrão 3-panel do `OrchestratorPage` |
 | Q4 | Tool calling integration | Anthropic Tool Use API nativo (Claude SDK direto, sem ProviderRegistry) |
 | Q5 | Modelo padrão | Claude Sonnet 4.6 |
-| Q6 | Permission scope | C — admin sempre + member com `tenant_members.copilot_enabled=TRUE` |
+| Q6 | Permission scope | **B (revisado em 2026-04-28)** — admin-only no MVP. Q5 original (C: hybrid com `tenant_members.copilot_enabled`) descartado após audit revelar que JWT não tem `sub` e `tenant_members` não é queryable pelo app. Per-user opt-in defer pra spec futuro |
 | Q7 | Per-turn safety cap | C+E — 10 tool calls e $0.50 USD, env-configurable |
 | Q8 | Schema de mensagens | C — Anthropic content blocks JSONB + tabela `copilot_tool_calls` separada para audit |
 
@@ -143,7 +145,7 @@ CREATE POLICY "service_role_full_access" ON copilot_conversations
 CREATE POLICY "members_read_own_conversations" ON copilot_conversations
   FOR SELECT USING (
     tenant_id = ANY(user_tenant_ids())
-    AND user_id = (auth.jwt()->>'sub')
+    AND user_id = (auth.jwt()->>'email')
   );
 
 CREATE INDEX cc_tenant_user_recent_idx ON copilot_conversations(tenant_id, user_id, last_message_at DESC);
@@ -187,7 +189,7 @@ CREATE POLICY "members_read_own_messages" ON copilot_messages
     tenant_id = ANY(user_tenant_ids())
     AND conversation_id IN (
       SELECT id FROM copilot_conversations
-      WHERE user_id = (auth.jwt()->>'sub')
+      WHERE user_id = (auth.jwt()->>'email')
     )
   );
 
@@ -246,7 +248,7 @@ CREATE POLICY "members_read_own_tool_calls" ON copilot_tool_calls
     tenant_id = ANY(user_tenant_ids())
     AND conversation_id IN (
       SELECT id FROM copilot_conversations
-      WHERE user_id = (auth.jwt()->>'sub')
+      WHERE user_id = (auth.jwt()->>'email')
     )
   );
 
@@ -257,11 +259,9 @@ CREATE INDEX ctc_status_idx           ON copilot_tool_calls(status);
 
 `message_id` aponta para a assistant message que continha o `tool_use` block. `tool_result` é duplicado aqui propositalmente (audit table = denormalizada).
 
-### Alteração 4 · `tenant_members.copilot_enabled`
+### ~~Alteração 4 · `tenant_members.copilot_enabled`~~ — REMOVIDO
 
-```sql
-ALTER TABLE tenant_members ADD COLUMN copilot_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-```
+**Audit 2026-04-28**: descoberto que JWT da casa não tem `sub` user identifier (só `tenantId, email, role`) e `tenant_members` table não é queryable pelo app code. Per-user opt-in deferido. **Permission MVP é admin-only via JWT.role**, sem nova coluna.
 
 ### Seed 5 · Agent `aios-master` para tenant existente
 

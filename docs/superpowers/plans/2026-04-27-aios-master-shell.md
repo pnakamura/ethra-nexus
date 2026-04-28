@@ -12,6 +12,29 @@
 
 ---
 
+## Audit decision log (2026-04-28)
+
+After Tasks 1–2 entered review, a deeper audit of the codebase revealed gaps the original plan missed. Findings + fixes applied to this plan and the spec in a single batch:
+
+| # | Finding | Resolution |
+|---|---------|------------|
+| A1 | Migration `012_*` collided with existing `012_agent_identity_channels.sql`; numbering went to 020 | Renamed to `021_copilot_tables.sql` (next free slot) |
+| A2 | RLS enabled on new tables but NO policies — backend would have failed all writes | Added `service_role_full_access` (FOR ALL) + `members_read_own_*` (FOR SELECT) policies on all 3 tables, matching `004_aios_events.sql` pattern |
+| A3 | Missing `CHECK` constraints on status/role columns | Added: `status IN ('active','archived')`, `role IN ('user','assistant')`, `status IN ('completed','error')` |
+| A4 | Missing `updated_at` trigger on `copilot_conversations` | Added trigger using existing `update_updated_at()` from migration 001 |
+| A5 | FK ON DELETE behavior incomplete | `tenant_id ON DELETE CASCADE` everywhere; `agent_id` nullable + `ON DELETE SET NULL` (matches `aios_events`); `conversation_id` cascade in tool_calls |
+| A6 | Low-selectivity index `cm_tenant_role_idx` (only 2 distinct values) | Removed |
+| A7 | **JWT da casa não tem `sub`** — only `{ tenantId, email, role }` ([app.ts:73](apps/server/src/app.ts#L73)) | RLS uses `auth.jwt()->>'email'`. Plan permission middleware uses `request.user.email`. Schema column `user_id TEXT` stores email |
+| A8 | `tenant_members` table exists in SQL but **zero app code queries it** | Dropped `ALTER TABLE tenant_members ADD copilot_enabled` from migration. Permission MVP is **admin-only via JWT.role**. Per-user opt-in deferred to spec future when JWT has user identity |
+| A9 | `executeWikiQuery` is private in `skill-executor.ts` (not exported) | Task 14 re-implements query inline using `embed` + raw SQL pgvector. No coupling to skill-executor internals |
+| A10 | Drizzle style inconsistent with existing files (`(t) =>` vs `(table) =>`, alignment) | Updated copilot.ts to single-space alignment + `(table) =>` callback parameter, with file header comment |
+
+**Spec Q5 revision**: original choice "C — admin + tenant_members.copilot_enabled" replaced with **B — admin-only**. Per-user opt-in is now a deferred concern in the "Open questions / future work" section.
+
+Tasks 22 and 23 carry inline AUDIT NOTE blocks reminding the implementer that test mocks must drop the tenant_members lookup branches.
+
+---
+
 ## File Structure
 
 ### Backend — `packages/db`
@@ -38,7 +61,7 @@
 | `tools/cost-breakdown.ts` | Tool 5 | NEW |
 | `tools/agent-health.ts` | Tool 6 | NEW |
 | `tools/list-pending-approvals.ts` | Tool 7 | NEW |
-| `tools/wiki-query.ts` | Tool 8 (wraps `executeWikiQuery`) | NEW |
+| `tools/wiki-query.ts` | Tool 8 (inline pgvector query — does NOT import private `executeWikiQuery`) | NEW |
 | `tools/list-storage-alerts.ts` | Tool 9 (stub returning `[]`) | NEW |
 | `turn-loop.ts` | `executeCopilotTurn` orchestration | NEW |
 | `__tests__/*.test.ts` | Vitest tests | NEW |
@@ -76,7 +99,7 @@
 
 | # | Phase | Task |
 |---|-------|------|
-| 1 | DB | Migration SQL + ALTER tenant_members |
+| 1 | DB | Migration SQL — copilot tables (admin-only permission, no tenant_members alter) |
 | 2 | DB | Drizzle schema for copilot tables |
 | 3 | DB | Apply migration locally + seed aios-master |
 | 4 | Foundation | Anthropic client wrapper |
@@ -115,7 +138,7 @@ Each task ends with a commit. Naming: `feat(copilot): <component>` for features,
 
 ---
 
-## Task 1: Migration SQL — copilot tables + tenant_members alter
+## Task 1: Migration SQL — copilot tables (admin-only)
 
 **Files:**
 - Create: `infra/supabase/migrations/021_copilot_tables.sql`
@@ -166,7 +189,7 @@ CREATE POLICY "service_role_full_access" ON copilot_conversations
 CREATE POLICY "members_read_own_conversations" ON copilot_conversations
   FOR SELECT USING (
     tenant_id = ANY(user_tenant_ids())
-    AND user_id = (auth.jwt()->>'sub')
+    AND user_id = (auth.jwt()->>'email')
   );
 
 CREATE INDEX cc_tenant_user_recent_idx ON copilot_conversations(tenant_id, user_id, last_message_at DESC);
@@ -204,7 +227,7 @@ CREATE POLICY "members_read_own_messages" ON copilot_messages
     tenant_id = ANY(user_tenant_ids())
     AND conversation_id IN (
       SELECT id FROM copilot_conversations
-      WHERE user_id = (auth.jwt()->>'sub')
+      WHERE user_id = (auth.jwt()->>'email')
     )
   );
 
@@ -238,7 +261,7 @@ CREATE POLICY "members_read_own_tool_calls" ON copilot_tool_calls
     tenant_id = ANY(user_tenant_ids())
     AND conversation_id IN (
       SELECT id FROM copilot_conversations
-      WHERE user_id = (auth.jwt()->>'sub')
+      WHERE user_id = (auth.jwt()->>'email')
     )
   );
 
@@ -246,18 +269,18 @@ CREATE INDEX ctc_tenant_tool_time_idx ON copilot_tool_calls(tenant_id, tool_name
 CREATE INDEX ctc_message_idx          ON copilot_tool_calls(message_id);
 CREATE INDEX ctc_status_idx           ON copilot_tool_calls(status);
 
--- ── 4. tenant_members.copilot_enabled flag ──────────────────
-
-ALTER TABLE tenant_members ADD COLUMN IF NOT EXISTS copilot_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+-- NOTE: tenant_members.copilot_enabled NÃO é adicionado.
+-- O modelo de permission MVP é admin-only via JWT.role no app layer.
+-- Per-user opt-in fica para spec futuro quando JWT tiver 'sub' real.
 ```
 
-> **Code review notes** (applied 2026-04-28): RLS policies (`service_role_full_access` + member-scoped read), CHECK on `status`/`role`, ON DELETE CASCADE on tenant_id and conversation_id FKs, ON DELETE SET NULL on agent_id (with agent_id nullable), `updated_at` trigger using existing `update_updated_at()` function. Removed `cm_tenant_role_idx` (low selectivity — role has 2 values).
+> **Code review notes** (applied 2026-04-28): RLS policies (`service_role_full_access` + member-scoped read via `auth.jwt()->>'email'`), CHECK on `status`/`role`, ON DELETE CASCADE on tenant_id and conversation_id FKs, ON DELETE SET NULL on agent_id (with agent_id nullable), `updated_at` trigger using existing `update_updated_at()` function. Removed `cm_tenant_role_idx` (low selectivity — role has 2 values). **Audit 2026-04-28**: removida ALTER TABLE para `tenant_members.copilot_enabled` — JWT da casa não tem `sub` user identity, permission é admin-only no MVP.
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add infra/supabase/migrations/021_copilot_tables.sql
-git commit -m "feat(db): migration 021 — copilot tables + tenant_members.copilot_enabled"
+git commit -m "feat(db): migration 021 — copilot tables (admin-only permission)"
 ```
 
 ---
@@ -1923,13 +1946,15 @@ git commit -m "feat(copilot): tool system:list_pending_approvals"
 
 ---
 
-## Task 14: Tool — `system:wiki_query` (wraps existing skill)
+## Task 14: Tool — `system:wiki_query`
 
 **Files:**
 - Create: `packages/agents/src/lib/copilot/tools/wiki-query.ts`
 - Create: `packages/agents/src/__tests__/copilot-tool-wiki-query.test.ts`
 
-This tool delegates to the existing `executeWikiQuery` function in `packages/agents/src/lib/skills/skill-executor.ts`. It does NOT re-implement search.
+> **AUDIT NOTE (2026-04-28)**: original plan said "wraps existing executeWikiQuery". That function is **private** in `skill-executor.ts` (not exported). Re-implement the query inline in this tool — uses the same primitives (`embed`, `getDb`, raw SQL pgvector) but kept independent. This avoids coupling to an internal skill-executor symbol.
+
+The implementation below already does the query inline (uses `embed` + raw SQL via `db.execute(sql\`...\`)`) — no import of `executeWikiQuery` is needed. Do NOT try to import `executeWikiQuery` from skill-executor.
 
 - [ ] **Step 1: Write failing test**
 
@@ -3368,40 +3393,25 @@ Write `apps/server/src/routes/copilot.ts`:
 
 ```typescript
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { eq, and } from 'drizzle-orm'
-import { getDb, tenantMembers } from '@ethra-nexus/db'
 
 declare module 'fastify' {
   interface FastifyRequest {
-    userId?: string
+    userEmail?: string
     userRole?: 'admin' | 'member'
   }
 }
 
+// Audit-revised (2026-04-28): JWT da casa contém { tenantId, email, role }.
+// MVP é admin-only — sem lookup em tenant_members (table existe em SQL mas
+// não é queryable pelo app code; per-user opt-in defere até JWT ter user identity).
 async function requireCopilotAccess(request: FastifyRequest, reply: FastifyReply) {
-  const userId = (request.user as { sub?: string } | undefined)?.sub
-  if (!userId) return reply.status(401).send({ error: 'Unauthorized' })
-
-  const db = getDb()
-  const rows = await db.select({
-    role: tenantMembers.role,
-    copilot_enabled: tenantMembers.copilot_enabled,
-  })
-    .from(tenantMembers)
-    .where(and(
-      eq(tenantMembers.user_id, userId),
-      eq(tenantMembers.tenant_id, request.tenantId),
-    ))
-    .limit(1)
-
-  const member = rows[0]
-  if (!member) return reply.status(403).send({ error: 'Not a member' })
-  if (member.role !== 'admin' && !member.copilot_enabled) {
-    return reply.status(403).send({ error: 'Copilot access not enabled' })
+  const user = request.user as { tenantId?: string; email?: string; role?: string } | undefined
+  if (!user?.email) return reply.status(401).send({ error: 'Unauthorized' })
+  if (user.role !== 'admin') {
+    return reply.status(403).send({ error: 'Copilot is admin-only' })
   }
-
-  request.userId = userId
-  request.userRole = member.role as 'admin' | 'member'
+  request.userEmail = user.email
+  request.userRole = user.role as 'admin' | 'member'
 }
 
 export async function copilotRoutes(app: FastifyInstance) {
@@ -3409,7 +3419,7 @@ export async function copilotRoutes(app: FastifyInstance) {
 
   // Health check (sanity route)
   app.get('/copilot/health', async (request) => {
-    return { ok: true, user_id: request.userId, role: request.userRole }
+    return { ok: true, user_email: request.userEmail, role: request.userRole }
   })
 
   // Real endpoints come in Tasks 22 and 23.
@@ -3438,7 +3448,7 @@ Start server (`npm run dev` from project root). Hit:
 curl -i http://localhost:3001/api/v1/copilot/health -H "Authorization: Bearer <admin-jwt>"
 ```
 
-Expected: 200 with `{"ok":true,"user_id":"...","role":"admin"}`.
+Expected: 200 with `{"ok":true,"user_email":"...","role":"admin"}`.
 
 ```bash
 curl -i http://localhost:3001/api/v1/copilot/health
@@ -3446,16 +3456,25 @@ curl -i http://localhost:3001/api/v1/copilot/health
 
 Expected: 401 Unauthorized.
 
+```bash
+# (with a non-admin token)
+curl -i http://localhost:3001/api/v1/copilot/health -H "Authorization: Bearer <member-jwt>"
+```
+
+Expected: 403 with `{"error":"Copilot is admin-only"}`.
+
 - [ ] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/routes/copilot.ts apps/server/src/app.ts
-git commit -m "feat(api): copilot route registration + permission middleware"
+git commit -m "feat(api): copilot route registration + admin-only middleware"
 ```
 
 ---
 
 ## Task 22: Conversation CRUD endpoints
+
+> **AUDIT NOTE (2026-04-28)**: middleware was simplified to admin-only (Task 21 has the canonical version). The test scaffolding in Step 1 below was written assuming a DB lookup for `tenant_members.copilot_enabled`. Adapt: the test cases that simulate "first call returns member, second returns data" should be simplified — there is no member lookup anymore, just the data query. Drop the `if (calls === 1) return ... copilot_enabled` branches and renumber subsequent calls.
 
 **Files:**
 - Modify: `apps/server/src/routes/copilot.ts` (add 5 endpoints)
@@ -3483,7 +3502,6 @@ import { vi } from 'vitest'
 
 vi.mock('@ethra-nexus/db', () => ({
   getDb: () => mockDb,
-  tenantMembers: { user_id: 'u', tenant_id: 't', role: 'r', copilot_enabled: 'ce' },
   copilotConversations: { id: 'id', tenant_id: 'tid', user_id: 'uid', agent_id: 'aid', title: 'title', status: 'status', last_message_at: 'lma', updated_at: 'ua' },
   copilotMessages: { conversation_id: 'cid', tenant_id: 'tid' },
   agents: { id: 'id', tenant_id: 'tid', slug: 'slug' },
@@ -3498,19 +3516,13 @@ vi.mock('drizzle-orm', () => ({
 
 const { copilotRoutes } = await import('../routes/copilot')
 
-async function buildApp(userId: string, tenantId: string, role: 'admin' | 'member' = 'admin'): Promise<FastifyInstance> {
+async function buildApp(userEmail: string, tenantId: string, role: 'admin' | 'member' = 'admin'): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   app.addHook('onRequest', async (request) => {
     request.tenantId = tenantId
-    ;(request as { user?: { sub: string } }).user = { sub: userId }
-  })
-  // Stub member lookup to allow access
-  mockDb.select.mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        limit: vi.fn().mockResolvedValue([{ role, copilot_enabled: false }]),
-      }),
-    }),
+    ;(request as { user?: { tenantId: string; email: string; role: string } }).user = {
+      tenantId, email: userEmail, role,
+    }
   })
   await app.register(copilotRoutes, { prefix: '/api/v1' })
   return app
@@ -3604,7 +3616,7 @@ export async function copilotRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireCopilotAccess)
 
   app.get('/copilot/health', async (request) => {
-    return { ok: true, user_id: request.userId, role: request.userRole }
+    return { ok: true, user_id: request.userEmail, role: request.userRole }
   })
 
   // POST /copilot/conversations — create a new thread
@@ -3618,7 +3630,7 @@ export async function copilotRoutes(app: FastifyInstance) {
 
     const inserted = await db.insert(copilotConversations).values({
       tenant_id: request.tenantId,
-      user_id: request.userId!,
+      user_id: request.userEmail!,
       agent_id: aios[0].id,
       title: null,
       status: 'active',
@@ -3634,7 +3646,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       const limit = Math.min(parseInt(request.query.limit ?? '50', 10), 100)
       const conditions = [
         eq(copilotConversations.tenant_id, request.tenantId),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
       ]
       if (request.query.status) conditions.push(eq(copilotConversations.status, request.query.status))
 
@@ -3654,7 +3666,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       .from(copilotConversations)
       .where(and(
         eq(copilotConversations.id, request.params.id),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .limit(1)
@@ -3681,7 +3693,7 @@ export async function copilotRoutes(app: FastifyInstance) {
         .set(updates)
         .where(and(
           eq(copilotConversations.id, request.params.id),
-          eq(copilotConversations.user_id, request.userId!),
+          eq(copilotConversations.user_id, request.userEmail!),
           eq(copilotConversations.tenant_id, request.tenantId),
         ))
         .returning()
@@ -3697,7 +3709,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       .set({ status: 'archived', updated_at: new Date() })
       .where(and(
         eq(copilotConversations.id, request.params.id),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .returning()
@@ -3715,7 +3727,7 @@ Update imports at top of `apps/server/src/routes/copilot.ts`:
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { eq, and, asc, desc } from 'drizzle-orm'
 import {
-  getDb, tenantMembers, copilotConversations, copilotMessages, agents,
+  getDb, copilotConversations, copilotMessages, agents,
 } from '@ethra-nexus/db'
 ```
 
@@ -3734,6 +3746,8 @@ git commit -m "feat(api): copilot conversation CRUD endpoints"
 ---
 
 ## Task 23: SSE message endpoint
+
+> **AUDIT NOTE (2026-04-28)**: same as Task 22 — test mocks need adaptation to admin-only middleware (no more `copilot_enabled` lookup). Use `request.user.email` for user_id throughout endpoint code.
 
 **Files:**
 - Modify: `apps/server/src/routes/copilot.ts` (add POST /messages with SSE)
@@ -3846,7 +3860,7 @@ Then replace the comment `// POST /copilot/conversations/:id/messages — added 
       .from(copilotConversations)
       .where(and(
         eq(copilotConversations.id, id),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .limit(1)
@@ -3884,7 +3898,7 @@ Then replace the comment `// POST /copilot/conversations/:id/messages — added 
       await executeCopilotTurn({
         conversation_id: id,
         tenant_id: request.tenantId,
-        user_id: request.userId!,
+        user_id: request.userEmail!,
         user_role: request.userRole!,
         content,
         system_prompt: systemPrompt,
@@ -5357,7 +5371,7 @@ Open dev server, login as admin, navigate to `/copilot`. Walk through:
 - [ ] Type follow-up "quanto gastei?" + Enter → sees `system:get_budget_status` invoked
 - [ ] Vague prompt (e.g., "me explique tudo sobre o universo") → cap may trigger; UI shows error inline if so
 - [ ] Temporarily set `ANTHROPIC_API_KEY=invalid` and restart server → send message → see error inline + toast
-- [ ] Restore key. Login as a non-admin member without `copilot_enabled` → `/copilot` request shows 403
+- [ ] Restore key. Login with a non-admin token (role !== 'admin') → `/copilot` request shows 403 with `Copilot is admin-only`
 - [ ] Open same thread in 2 browser tabs, send rapidly → 2nd tab's send returns 409 `TURN_IN_PROGRESS`
 
 - [ ] **Step 4: Address any issues found in the checklist**
