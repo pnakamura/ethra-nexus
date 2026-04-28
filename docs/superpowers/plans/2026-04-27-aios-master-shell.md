@@ -20,7 +20,7 @@
 |------|---------|--------|
 | `packages/db/src/schema/copilot.ts` | Drizzle schema for 3 copilot tables | NEW |
 | `packages/db/src/schema/index.ts` | Re-export copilot schema | MODIFY |
-| `infra/supabase/migrations/012_copilot_tables.sql` | SQL migration (tables + ALTER + seed) | NEW |
+| `infra/supabase/migrations/021_copilot_tables.sql` | SQL migration (tables + ALTER + seed) | NEW |
 
 ### Backend — `packages/agents/src/lib/copilot/`
 
@@ -118,23 +118,38 @@ Each task ends with a commit. Naming: `feat(copilot): <component>` for features,
 ## Task 1: Migration SQL — copilot tables + tenant_members alter
 
 **Files:**
-- Create: `infra/supabase/migrations/012_copilot_tables.sql`
+- Create: `infra/supabase/migrations/021_copilot_tables.sql`
 
 - [ ] **Step 1: Create the migration file**
 
-Write `infra/supabase/migrations/012_copilot_tables.sql`:
+Write `infra/supabase/migrations/021_copilot_tables.sql`:
 
 ```sql
--- Migration 012: Copilot tables for AIOS Master Agent (Spec #1)
--- Safe: only adds new tables and one nullable-defaulted column
+-- ============================================================
+-- 021_copilot_tables.sql
+-- AIOS Master Agent (shell) — Spec #1
+-- Tabelas de conversas, mensagens (Anthropic content blocks),
+-- e audit de tool calls do copilot conversacional read-only.
+--
+-- SEGURANÇA:
+-- - RLS habilitado + policies (service_role + tenant scoping)
+-- - tenant_id NOT NULL e indexado em todas
+-- - cascade delete: conv → messages → tool_calls
+-- - CHECK constraints em status
+-- - updated_at trigger em conversations (segue padrão da casa)
+-- - ADD COLUMN IF NOT EXISTS para idempotência local
+-- ============================================================
+
+-- ── 1. Conversations ────────────────────────────────────────
 
 CREATE TABLE copilot_conversations (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   user_id         TEXT NOT NULL,
-  agent_id        UUID NOT NULL REFERENCES agents(id),
+  agent_id        UUID REFERENCES agents(id) ON DELETE SET NULL,
   title           TEXT,
-  status          TEXT NOT NULL DEFAULT 'active',
+  status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'archived')),
   message_count   INTEGER NOT NULL DEFAULT 0,
   total_tokens    INTEGER NOT NULL DEFAULT 0,
   total_cost_usd  NUMERIC(10,6) NOT NULL DEFAULT 0,
@@ -142,15 +157,33 @@ CREATE TABLE copilot_conversations (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_conversations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_full_access" ON copilot_conversations
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_conversations" ON copilot_conversations
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND user_id = (auth.jwt()->>'sub')
+  );
+
 CREATE INDEX cc_tenant_user_recent_idx ON copilot_conversations(tenant_id, user_id, last_message_at DESC);
 CREATE INDEX cc_tenant_status_idx      ON copilot_conversations(tenant_id, status);
+
+CREATE TRIGGER copilot_conversations_updated_at
+  BEFORE UPDATE ON copilot_conversations
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ── 2. Messages (Anthropic content blocks: text/tool_use/tool_result) ─
 
 CREATE TABLE copilot_messages (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id UUID NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
-  role            TEXT NOT NULL,
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL
+                    CHECK (role IN ('user', 'assistant')),
   content         JSONB NOT NULL,
   model           TEXT,
   tokens_in       INTEGER NOT NULL DEFAULT 0,
@@ -160,37 +193,71 @@ CREATE TABLE copilot_messages (
   error_code      TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_messages ENABLE ROW LEVEL SECURITY;
-CREATE INDEX cm_conv_time_idx   ON copilot_messages(conversation_id, created_at);
-CREATE INDEX cm_tenant_role_idx ON copilot_messages(tenant_id, role);
+
+CREATE POLICY "service_role_full_access" ON copilot_messages
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_messages" ON copilot_messages
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND conversation_id IN (
+      SELECT id FROM copilot_conversations
+      WHERE user_id = (auth.jwt()->>'sub')
+    )
+  );
+
+CREATE INDEX cm_conv_time_idx ON copilot_messages(conversation_id, created_at);
+
+-- ── 3. Tool calls (audit/observability) ─────────────────────
 
 CREATE TABLE copilot_tool_calls (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id      UUID NOT NULL REFERENCES copilot_messages(id) ON DELETE CASCADE,
-  conversation_id UUID NOT NULL REFERENCES copilot_conversations(id),
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  conversation_id UUID NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   tool_use_id     TEXT NOT NULL,
   tool_name       TEXT NOT NULL,
   tool_input      JSONB NOT NULL DEFAULT '{}',
   tool_result     JSONB,
-  status          TEXT NOT NULL,
+  status          TEXT NOT NULL
+                    CHECK (status IN ('completed', 'error')),
   error_code      TEXT,
   duration_ms     INTEGER NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_tool_calls ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_full_access" ON copilot_tool_calls
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_tool_calls" ON copilot_tool_calls
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND conversation_id IN (
+      SELECT id FROM copilot_conversations
+      WHERE user_id = (auth.jwt()->>'sub')
+    )
+  );
+
 CREATE INDEX ctc_tenant_tool_time_idx ON copilot_tool_calls(tenant_id, tool_name, created_at DESC);
 CREATE INDEX ctc_message_idx          ON copilot_tool_calls(message_id);
 CREATE INDEX ctc_status_idx           ON copilot_tool_calls(status);
 
+-- ── 4. tenant_members.copilot_enabled flag ──────────────────
+
 ALTER TABLE tenant_members ADD COLUMN IF NOT EXISTS copilot_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ```
+
+> **Code review notes** (applied 2026-04-28): RLS policies (`service_role_full_access` + member-scoped read), CHECK on `status`/`role`, ON DELETE CASCADE on tenant_id and conversation_id FKs, ON DELETE SET NULL on agent_id (with agent_id nullable), `updated_at` trigger using existing `update_updated_at()` function. Removed `cm_tenant_role_idx` (low selectivity — role has 2 values).
 
 - [ ] **Step 2: Commit**
 
 ```bash
-git add infra/supabase/migrations/012_copilot_tables.sql
-git commit -m "feat(db): migration 012 — copilot tables + tenant_members.copilot_enabled"
+git add infra/supabase/migrations/021_copilot_tables.sql
+git commit -m "feat(db): migration 021 — copilot tables + tenant_members.copilot_enabled"
 ```
 
 ---
@@ -213,9 +280,9 @@ import { tenants, agents } from './core'
 
 export const copilotConversations = pgTable('copilot_conversations', {
   id:              uuid('id').primaryKey().defaultRandom(),
-  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id),
+  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   user_id:         text('user_id').notNull(),
-  agent_id:        uuid('agent_id').notNull().references(() => agents.id),
+  agent_id:        uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
   title:           text('title'),
   status:          text('status').notNull().default('active'),
   message_count:   integer('message_count').notNull().default(0),
@@ -232,7 +299,7 @@ export const copilotConversations = pgTable('copilot_conversations', {
 export const copilotMessages = pgTable('copilot_messages', {
   id:              uuid('id').primaryKey().defaultRandom(),
   conversation_id: uuid('conversation_id').notNull().references(() => copilotConversations.id, { onDelete: 'cascade' }),
-  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id),
+  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   role:            text('role').notNull(),
   content:         jsonb('content').notNull(),
   model:           text('model'),
@@ -243,15 +310,14 @@ export const copilotMessages = pgTable('copilot_messages', {
   error_code:      text('error_code'),
   created_at:      timestamp('created_at').notNull().defaultNow(),
 }, (t) => ({
-  convTime:   index('cm_conv_time_idx').on(t.conversation_id, t.created_at),
-  tenantRole: index('cm_tenant_role_idx').on(t.tenant_id, t.role),
+  convTime: index('cm_conv_time_idx').on(t.conversation_id, t.created_at),
 }))
 
 export const copilotToolCalls = pgTable('copilot_tool_calls', {
   id:              uuid('id').primaryKey().defaultRandom(),
   message_id:      uuid('message_id').notNull().references(() => copilotMessages.id, { onDelete: 'cascade' }),
-  conversation_id: uuid('conversation_id').notNull().references(() => copilotConversations.id),
-  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id),
+  conversation_id: uuid('conversation_id').notNull().references(() => copilotConversations.id, { onDelete: 'cascade' }),
+  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   tool_use_id:     text('tool_use_id').notNull(),
   tool_name:       text('tool_name').notNull(),
   tool_input:      jsonb('tool_input').notNull().default({}),
@@ -292,14 +358,14 @@ git commit -m "feat(db): drizzle schema for copilot tables"
 ## Task 3: Seed migration — aios-master agent per tenant
 
 **Files:**
-- Create: `infra/supabase/migrations/013_seed_aios_master.sql`
+- Create: `infra/supabase/migrations/022_seed_aios_master.sql`
 
 - [ ] **Step 1: Create the seed migration**
 
-Write `infra/supabase/migrations/013_seed_aios_master.sql`:
+Write `infra/supabase/migrations/022_seed_aios_master.sql`:
 
 ```sql
--- Migration 013: Seed AIOS Master agent for each tenant (idempotent)
+-- Migration 022: Seed AIOS Master agent for each tenant (idempotent)
 
 INSERT INTO agents (
   id, tenant_id, slug, name, role, status, system_prompt,
@@ -344,7 +410,7 @@ Expected after running both: `SELECT slug FROM agents WHERE slug = 'aios-master'
 - [ ] **Step 3: Commit**
 
 ```bash
-git add infra/supabase/migrations/013_seed_aios_master.sql
+git add infra/supabase/migrations/022_seed_aios_master.sql
 git commit -m "feat(db): seed aios-master agent per tenant"
 ```
 
