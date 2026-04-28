@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { SignupPage } from '@/pages/SignupPage'
 import { DashboardPage } from '@/pages/DashboardPage'
+import { CopilotPage } from '@/pages/CopilotPage'
 import { AgentsPage } from '@/pages/AgentsPage'
 import { AgentNewPage } from '@/pages/AgentNewPage'
 import { AgentDetailPage } from '@/pages/AgentDetailPage'
@@ -20,6 +21,7 @@ export default function App() {
       <Route element={<PrivateRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/copilot" element={<CopilotPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/new" element={<AgentNewPage />} />
