@@ -3,6 +3,7 @@ import { eq, and, asc, desc } from 'drizzle-orm'
 import {
   getDb, copilotConversations, copilotMessages, agents,
 } from '@ethra-nexus/db'
+import { executeCopilotTurn, generateAutoTitle, AIOS_MASTER_SYSTEM_PROMPT } from '@ethra-nexus/agents'
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -10,6 +11,9 @@ declare module 'fastify' {
     userRole?: 'admin' | 'member'
   }
 }
+
+// Per-conversation lock to block overlapping turns. In-memory; sufficient for single-instance.
+const turnLocks = new Set<string>()
 
 // Audit-revised (2026-04-28): JWT da casa contém { tenantId, email, role }.
 // MVP é admin-only — sem lookup em tenant_members (table existe em SQL mas
@@ -129,5 +133,84 @@ export async function copilotRoutes(app: FastifyInstance) {
     return reply.status(204).send()
   })
 
-  // POST /copilot/conversations/:id/messages — added in Task 23
+  // POST /copilot/conversations/:id/messages — SSE turn loop (Task 23)
+  app.post<{
+    Params: { id: string }
+    Body: { content: string }
+  }>('/copilot/conversations/:id/messages', async (request, reply) => {
+    const { id } = request.params
+    const content = request.body?.content
+    if (!content || content.trim().length === 0) {
+      return reply.status(400).send({ error: 'CONTENT_EMPTY' })
+    }
+    if (content.length > 50000) {
+      return reply.status(413).send({ error: 'CONTENT_TOO_LARGE' })
+    }
+
+    const db = getDb()
+    const convRows = await db.select()
+      .from(copilotConversations)
+      .where(and(
+        eq(copilotConversations.id, id),
+        eq(copilotConversations.user_id, request.userEmail!),
+        eq(copilotConversations.tenant_id, request.tenantId),
+      ))
+      .limit(1)
+    const conv = convRows[0]
+    if (!conv) return reply.status(404).send({ error: 'Not found' })
+    if (conv.status !== 'active') return reply.status(409).send({ error: 'CONVERSATION_ARCHIVED' })
+    if (!conv.agent_id) return reply.status(500).send({ error: 'Conversation missing agent_id' })
+
+    // Per-conversation lock
+    if (turnLocks.has(id)) return reply.status(409).send({ error: 'TURN_IN_PROGRESS' })
+    turnLocks.add(id)
+
+    // Open SSE stream
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    const sseWrite = (event: { type: string; [k: string]: unknown }) => {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+
+    const abortController = new AbortController()
+    request.raw.on('close', () => abortController.abort())
+
+    // Look up agent system_prompt (fallback to constant if missing)
+    const agentRows = await db.select({ system_prompt: agents.system_prompt })
+      .from(agents)
+      .where(eq(agents.id, conv.agent_id))
+      .limit(1)
+    const systemPrompt = agentRows[0]?.system_prompt ?? AIOS_MASTER_SYSTEM_PROMPT
+
+    try {
+      await executeCopilotTurn({
+        conversation_id: id,
+        tenant_id: request.tenantId,
+        user_id: request.userEmail!,
+        user_role: request.userRole!,
+        aios_master_agent_id: conv.agent_id,
+        content,
+        system_prompt: systemPrompt,
+        sse: { write: sseWrite },
+        abortSignal: abortController.signal,
+      })
+
+      // Fire-and-forget auto-title (only on success, only if title still null)
+      void generateAutoTitle(id)
+    } catch (err) {
+      sseWrite({
+        type: 'error',
+        code: 'TURN_FAILED',
+        message: err instanceof Error ? err.message : 'unknown',
+      })
+    } finally {
+      turnLocks.delete(id)
+      reply.raw.end()
+    }
+  })
 }

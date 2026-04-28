@@ -53,3 +53,16 @@ export type { WikiLessonInput } from './lib/wiki/wiki-writer'
 export { A2AClient } from './lib/a2a/client'
 export { AgentCardSchema } from './lib/a2a/schemas'
 export type { ValidatedAgentCard } from './lib/a2a/schemas'
+
+// Copilot (Admin Shell)
+export {
+  getAnthropicClient,
+  AIOS_MASTER_SYSTEM_PROMPT,
+  executeToolCall,
+  getToolsForAnthropic,
+  allCopilotTools,
+  findToolByName,
+  executeCopilotTurn,
+  generateAutoTitle,
+} from './lib/copilot'
+export type { CopilotTool, ToolContext, ToolCallResult, ExecuteCopilotTurnParams, TurnResult, SseWriter } from './lib/copilot'
