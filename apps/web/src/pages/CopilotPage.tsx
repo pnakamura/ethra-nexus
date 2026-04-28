@@ -1,9 +1,13 @@
 import { useState } from 'react'
 import { ConversationsSidebar } from '@/components/copilot/ConversationsSidebar'
 import { ChatView } from '@/components/copilot/ChatView'
+import { ToolCallsLog } from '@/components/copilot/ToolCallsLog'
+import { useCopilotConversation, useSendCopilotMessage } from '@/hooks/useCopilot'
 
 export function CopilotPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const { data } = useCopilotConversation(selectedId)
+  const stream = useSendCopilotMessage(selectedId)
 
   return (
     <div
@@ -20,12 +24,10 @@ export function CopilotPage() {
         </div>
       )}
 
-      <aside className="w-[280px] flex-shrink-0 border-l-hairline bg-background">
-        <div className="p-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Tool calls
-        </div>
-        <p className="px-3 text-[11px] text-muted-foreground">Coming in Task 30</p>
-      </aside>
+      <ToolCallsLog
+        messages={data?.messages ?? []}
+        streamingTools={stream.currentToolCalls}
+      />
     </div>
   )
 }
