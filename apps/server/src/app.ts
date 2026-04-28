@@ -21,6 +21,7 @@ import { agentChannelsRoutes } from './routes/agent-channels'
 import { a2aManagementRoutes, a2aProtocolRoutes, a2aPublicRoutes } from './routes/a2a'
 import { wizardRoutes } from './routes/wizard'
 import { dashboardRoutes } from './routes/dashboard'
+import { copilotRoutes } from './routes/copilot'
 import { startSchedulerLoop } from '@ethra-nexus/agents'
 
 // ============================================================
@@ -95,6 +96,7 @@ export async function buildApp() {
   await app.register(a2aProtocolRoutes, { prefix: '/api/v1' })
   await app.register(wizardRoutes, { prefix: '/api/v1' })
   await app.register(dashboardRoutes, { prefix: '/api/v1' })
+  await app.register(copilotRoutes, { prefix: '/api/v1' })
 
   startSchedulerLoop()
 
