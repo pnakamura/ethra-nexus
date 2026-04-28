@@ -9,9 +9,8 @@ import { createAgentsDb } from '../db/db-agents'
 
 const MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS = 4000
-const ESTIMATED_COST_PER_TURN = 0.05  // pre-check estimate
+const ESTIMATED_COST_PER_TURN = 0.05
 
-// Anthropic SDK message blocks (subset we use)
 type TextBlock = { type: 'text'; text: string }
 type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
 type ToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
@@ -40,9 +39,89 @@ export interface TurnResult {
   stop_reason: string
 }
 
+interface AssistantStepResult {
+  blocks: ContentBlock[]
+  tokens_in: number
+  tokens_out: number
+  stop_reason: string
+}
+
+async function streamAssistantStep(args: {
+  history: Array<{ role: 'user' | 'assistant'; content: ContentBlock[] }>
+  system: string
+  abortSignal: AbortSignal
+  sse: SseWriter
+}): Promise<AssistantStepResult> {
+  const anth = getAnthropicClient()
+  const stream = await anth.messages.create({
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: args.system,
+    tools: getToolsForAnthropic(allCopilotTools),
+    messages: args.history,
+    stream: true,
+  }, { signal: args.abortSignal })
+
+  const blocks: ContentBlock[] = []
+  let currentText = ''
+  let currentToolUse: ToolUseBlock | null = null
+  let currentToolJson = ''
+  let tokensIn = 0
+  let tokensOut = 0
+  let stopReason = 'end_turn'
+
+  for await (const ev of stream as AsyncIterable<{ type: string; [k: string]: unknown }>) {
+    if (ev.type === 'content_block_start') {
+      const cb = ev['content_block'] as { type: string; id?: string; name?: string; input?: Record<string, unknown> }
+      if (cb.type === 'text') {
+        currentText = ''
+      } else if (cb.type === 'tool_use') {
+        currentToolUse = { type: 'tool_use', id: cb.id ?? '', name: cb.name ?? '', input: cb.input ?? {} }
+        currentToolJson = ''
+        args.sse.write({ type: 'tool_use_start', tool_use_id: currentToolUse.id, tool_name: currentToolUse.name })
+      }
+    } else if (ev.type === 'content_block_delta') {
+      const delta = ev['delta'] as { type: string; text?: string; partial_json?: string }
+      if (delta.type === 'text_delta' && delta.text) {
+        currentText += delta.text
+        args.sse.write({ type: 'text_delta', delta: delta.text })
+      } else if (delta.type === 'input_json_delta' && delta.partial_json) {
+        currentToolJson += delta.partial_json
+      }
+    } else if (ev.type === 'content_block_stop') {
+      if (currentText) {
+        blocks.push({ type: 'text', text: currentText })
+        currentText = ''
+      }
+      if (currentToolUse) {
+        if (currentToolJson) {
+          try { currentToolUse.input = JSON.parse(currentToolJson) } catch { /* keep input as-is */ }
+        }
+        blocks.push(currentToolUse)
+        currentToolUse = null
+        currentToolJson = ''
+      }
+    } else if (ev.type === 'message_delta') {
+      const md = ev['delta'] as { stop_reason?: string }
+      const usage = ev['usage'] as { input_tokens?: number; output_tokens?: number }
+      if (md.stop_reason) stopReason = md.stop_reason
+      if (usage) {
+        tokensIn += usage.input_tokens ?? 0
+        tokensOut += usage.output_tokens ?? 0
+      }
+    }
+  }
+
+  return { blocks, tokens_in: tokensIn, tokens_out: tokensOut, stop_reason: stopReason }
+}
+
+function blockCost(tokens_in: number, tokens_out: number): number {
+  return (tokens_in / 1_000_000) * 3 + (tokens_out / 1_000_000) * 15
+}
+
 export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<TurnResult> {
   const db = getDb()
-  const anth = getAnthropicClient()
+  const ctx: ToolContext = { tenant_id: p.tenant_id, user_id: p.user_id, user_role: p.user_role }
   const agentsDb = createAgentsDb()
   const month = new Date().toISOString().slice(0, 7)
 
@@ -63,7 +142,7 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
   const userMessageId = userMsgRows[0]!.id
   p.sse.write({ type: 'turn_start', user_message_id: userMessageId })
 
-  // 2. Load full history
+  // 2. Load history
   const historyRows = await db.select({
     role: copilotMessages.role, content: copilotMessages.content,
   })
@@ -71,114 +150,150 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
     .where(eq(copilotMessages.conversation_id, p.conversation_id))
     .orderBy(asc(copilotMessages.created_at))
 
-  const history = historyRows.map(r => ({
+  let history = historyRows.map(r => ({
     role: r.role as 'user' | 'assistant',
     content: r.content as ContentBlock[],
   }))
 
-  // 3. Call Anthropic (single iteration; tool loop comes in Task 18)
-  const ctx: ToolContext = { tenant_id: p.tenant_id, user_id: p.user_id, user_role: p.user_role }
-  let totalTokensIn = 0
-  let totalTokensOut = 0
+  // 3. Agentic loop
+  let totalIn = 0
+  let totalOut = 0
   let totalCost = 0
-  const toolCallCount = 0
+  let toolCallCount = 0
   let lastStopReason = 'end_turn'
+  let messagesPersistedInTurn = 1  // user message already counted
 
-  const stream = await anth.messages.create({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: p.system_prompt,
-    tools: getToolsForAnthropic(allCopilotTools),
-    messages: history,
-    stream: true,
-  }, { signal: p.abortSignal })
+  while (true) {
+    const step = await streamAssistantStep({
+      history,
+      system: p.system_prompt,
+      abortSignal: p.abortSignal,
+      sse: p.sse,
+    })
+    totalIn += step.tokens_in
+    totalOut += step.tokens_out
+    const stepCost = blockCost(step.tokens_in, step.tokens_out)
+    totalCost += stepCost
+    lastStopReason = step.stop_reason
 
-  const blocks: ContentBlock[] = []
-  let currentText = ''
+    const assistantRows = await db.insert(copilotMessages).values({
+      conversation_id: p.conversation_id,
+      tenant_id: p.tenant_id,
+      role: 'assistant',
+      content: step.blocks,
+      model: MODEL,
+      tokens_in: step.tokens_in,
+      tokens_out: step.tokens_out,
+      cost_usd: stepCost.toFixed(6),
+      stop_reason: step.stop_reason,
+    }).returning({ id: copilotMessages.id })
+    const assistantMessageId = assistantRows[0]!.id
+    messagesPersistedInTurn++
 
-  for await (const event of stream as AsyncIterable<{ type: string; [k: string]: unknown }>) {
-    if (event.type === 'content_block_start') {
-      const cb = event['content_block'] as { type: string; id?: string; name?: string }
-      if (cb.type === 'text') {
-        currentText = ''
-      } else if (cb.type === 'tool_use') {
-        blocks.push({ type: 'tool_use', id: cb.id ?? '', name: cb.name ?? '', input: {} })
+    p.sse.write({
+      type: 'assistant_message_complete',
+      message_id: assistantMessageId,
+      tokens_in: step.tokens_in,
+      tokens_out: step.tokens_out,
+      cost_usd: stepCost,
+      stop_reason: step.stop_reason,
+    })
+
+    // Per-step budget tracking (audit fix K1) — log AND upsert per step
+    await agentsDb.logProviderUsage({
+      tenant_id: p.tenant_id,
+      agent_id: p.aios_master_agent_id,
+      skill_id: 'copilot:turn',
+      provider: 'anthropic',
+      model: MODEL,
+      tokens_in: step.tokens_in,
+      tokens_out: step.tokens_out,
+      cost_usd: stepCost,
+      latency_ms: 0,
+      is_fallback: false,
+      is_sensitive: true,
+    })
+    await agentsDb.upsertBudget(
+      p.aios_master_agent_id,
+      p.tenant_id,
+      month,
+      stepCost,
+      step.tokens_in + step.tokens_out,
+    )
+
+    history = [...history, { role: 'assistant', content: step.blocks }]
+
+    if (step.stop_reason !== 'tool_use') break
+
+    // Execute each tool_use block
+    const toolResultBlocks: ToolResultBlock[] = []
+    for (const block of step.blocks) {
+      if (block.type !== 'tool_use') continue
+      toolCallCount++
+      const tool = findToolByName(block.name)
+
+      let result: unknown
+      let status = 'completed'
+      let errorCode: string | null = null
+      let durationMs = 0
+
+      if (!tool) {
+        result = { error: `Tool not found: ${block.name}` }
+        status = 'error'
+        errorCode = 'TOOL_NOT_FOUND'
+      } else {
+        const r = await executeToolCall(tool, block.input, ctx)
+        durationMs = r.durationMs
+        if (r.error) {
+          result = { error: r.error }
+          status = 'error'
+          errorCode = r.error
+        } else {
+          result = r.result
+        }
       }
-    } else if (event.type === 'content_block_delta') {
-      const delta = event['delta'] as { type: string; text?: string; partial_json?: string }
-      if (delta.type === 'text_delta' && delta.text) {
-        currentText += delta.text
-        p.sse.write({ type: 'text_delta', delta: delta.text })
-      }
-    } else if (event.type === 'content_block_stop') {
-      if (currentText) {
-        blocks.push({ type: 'text', text: currentText })
-        currentText = ''
-      }
-    } else if (event.type === 'message_delta') {
-      const md = event['delta'] as { stop_reason?: string }
-      const usage = event['usage'] as { input_tokens?: number; output_tokens?: number }
-      if (md.stop_reason) lastStopReason = md.stop_reason
-      if (usage) {
-        totalTokensIn += usage.input_tokens ?? 0
-        totalTokensOut += usage.output_tokens ?? 0
-      }
+
+      // Persist tool call
+      await db.insert(copilotToolCalls).values({
+        message_id: assistantMessageId,
+        conversation_id: p.conversation_id,
+        tenant_id: p.tenant_id,
+        tool_use_id: block.id,
+        tool_name: block.name,
+        tool_input: block.input,
+        tool_result: result as Record<string, unknown>,
+        status,
+        error_code: errorCode,
+        duration_ms: durationMs,
+      })
+
+      // Wrap result for the model (defensive against prompt injection)
+      const wrapped = `<tool_output tool="${block.name}">\n${JSON.stringify(result)}\n</tool_output>`
+      toolResultBlocks.push({
+        type: 'tool_result',
+        tool_use_id: block.id,
+        content: wrapped,
+        is_error: status === 'error',
+      })
+
+      p.sse.write({ type: 'tool_use_complete', tool_use_id: block.id, status, duration_ms: durationMs })
     }
+
+    // Append synthetic user message with tool_results
+    await db.insert(copilotMessages).values({
+      conversation_id: p.conversation_id,
+      tenant_id: p.tenant_id,
+      role: 'user',
+      content: toolResultBlocks,
+    })
+    history = [...history, { role: 'user', content: toolResultBlocks }]
+    messagesPersistedInTurn++
   }
 
-  // Estimate cost (Sonnet 4.6 rates: $3/M input, $15/M output)
-  const messageCost = (totalTokensIn / 1_000_000) * 3 + (totalTokensOut / 1_000_000) * 15
-  totalCost += messageCost
-
-  // 4. Persist assistant message
-  const assistantRows = await db.insert(copilotMessages).values({
-    conversation_id: p.conversation_id,
-    tenant_id: p.tenant_id,
-    role: 'assistant',
-    content: blocks,
-    model: MODEL,
-    tokens_in: totalTokensIn,
-    tokens_out: totalTokensOut,
-    cost_usd: messageCost.toFixed(6),
-    stop_reason: lastStopReason,
-  }).returning({ id: copilotMessages.id })
-  const assistantMessageId = assistantRows[0]!.id
-
-  p.sse.write({
-    type: 'assistant_message_complete',
-    message_id: assistantMessageId,
-    tokens_in: totalTokensIn,
-    tokens_out: totalTokensOut,
-    cost_usd: messageCost,
-    stop_reason: lastStopReason,
-  })
-
-  // 4b. Budget integration post-message (audit fix K1)
-  await agentsDb.logProviderUsage({
-    tenant_id: p.tenant_id,
-    agent_id: p.aios_master_agent_id,
-    skill_id: 'copilot:turn',
-    provider: 'anthropic',
-    model: MODEL,
-    tokens_in: totalTokensIn,
-    tokens_out: totalTokensOut,
-    cost_usd: messageCost,
-    latency_ms: 0,
-    is_fallback: false,
-    is_sensitive: true,
-  })
-  await agentsDb.upsertBudget(
-    p.aios_master_agent_id,
-    p.tenant_id,
-    month,
-    messageCost,
-    totalTokensIn + totalTokensOut,
-  )
-
-  // 5. Update conversation aggregates
+  // 4. Update conversation aggregates
   await db.update(copilotConversations).set({
-    message_count: sql`${copilotConversations.message_count} + 2`,
-    total_tokens: sql`${copilotConversations.total_tokens} + ${totalTokensIn + totalTokensOut}`,
+    message_count: sql`${copilotConversations.message_count} + ${messagesPersistedInTurn}`,
+    total_tokens: sql`${copilotConversations.total_tokens} + ${totalIn + totalOut}`,
     total_cost_usd: sql`${copilotConversations.total_cost_usd} + ${totalCost}`,
     last_message_at: new Date(),
     updated_at: new Date(),
@@ -186,13 +301,15 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
 
   p.sse.write({
     type: 'turn_complete',
-    total_tokens: totalTokensIn + totalTokensOut,
+    total_tokens: totalIn + totalOut,
     total_cost_usd: totalCost,
     tool_call_count: toolCallCount,
   })
 
-  // Suppress unused-import warnings for symbols Tasks 18+ will use
-  void copilotToolCalls; void executeToolCall; void findToolByName; void ctx
-
-  return { total_tokens: totalTokensIn + totalTokensOut, total_cost_usd: totalCost, tool_call_count: toolCallCount, stop_reason: lastStopReason }
+  return {
+    total_tokens: totalIn + totalOut,
+    total_cost_usd: totalCost,
+    tool_call_count: toolCallCount,
+    stop_reason: lastStopReason,
+  }
 }

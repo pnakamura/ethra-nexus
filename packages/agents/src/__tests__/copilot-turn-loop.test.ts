@@ -189,3 +189,89 @@ describe('executeCopilotTurn — budget integration', () => {
     expect(mockUpsertBudget).toHaveBeenCalledWith('aios-1', 't1', expect.any(String), expect.any(Number), 150)
   })
 })
+
+describe('executeCopilotTurn — with tools', () => {
+  let sseEvents: Array<{ type: string; [k: string]: unknown }>
+  let sse: { write: (e: object) => void }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sseEvents = []
+    sse = { write: (e) => sseEvents.push(e as { type: string }) }
+
+    let insertCount = 0
+    mockInsert.mockImplementation(() => ({
+      values: vi.fn().mockReturnValue({
+        returning: vi.fn().mockImplementation(() => {
+          insertCount++
+          return Promise.resolve([{ id: `msg-${insertCount}` }])
+        }),
+      }),
+    }))
+
+    mockUpdate.mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([]),
+      }),
+    })
+
+    mockSelect.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          orderBy: vi.fn().mockResolvedValue([
+            { role: 'user', content: [{ type: 'text', text: 'Olá' }] },
+          ]),
+        }),
+      }),
+    })
+
+    mockCanExecute.mockResolvedValue({ allowed: true })
+    mockLogProviderUsage.mockResolvedValue(undefined)
+    mockUpsertBudget.mockResolvedValue(undefined)
+  })
+
+  it('runs tool, emits tool_use_start/complete, recurses to final response', async () => {
+    // First Anthropic call: returns tool_use
+    mockStream
+      .mockResolvedValueOnce({
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'test:noop', input: {} } }
+          yield { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } }
+          yield { type: 'content_block_stop', index: 0 }
+          yield { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { input_tokens: 10, output_tokens: 5 } }
+        },
+      })
+      // Second call: text response
+      .mockResolvedValueOnce({
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
+          yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'done' } }
+          yield { type: 'content_block_stop', index: 0 }
+          yield { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 12, output_tokens: 3 } }
+        },
+      })
+
+    // Spy on tools module to inject a noop tool
+    const toolsModule = await import('../lib/copilot/tools')
+    const noopTool = {
+      name: 'test:noop',
+      description: 'noop',
+      input_schema: { type: 'object', properties: {} },
+      permission: 'all_members' as const,
+      handler: async () => ({ ok: true }),
+    }
+    vi.spyOn(toolsModule, 'allCopilotTools', 'get').mockReturnValue([noopTool] as never)
+    vi.spyOn(toolsModule, 'findToolByName').mockReturnValue(noopTool as never)
+
+    await executeCopilotTurn({ ...baseParams, sse, abortSignal: new AbortController().signal })
+
+    const types = sseEvents.map(e => e.type)
+    expect(types).toContain('tool_use_start')
+    expect(types).toContain('tool_use_complete')
+    expect(mockStream).toHaveBeenCalledTimes(2)  // one round-trip due to tool
+
+    // Budget logged for BOTH steps (per-step, not per-turn)
+    expect(mockLogProviderUsage).toHaveBeenCalledTimes(2)
+    expect(mockUpsertBudget).toHaveBeenCalledTimes(2)
+  })
+})
