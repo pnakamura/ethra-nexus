@@ -35,6 +35,81 @@ Tasks 22 and 23 carry inline AUDIT NOTE blocks reminding the implementer that te
 
 ---
 
+## Karpathy Principles Audit (post Tasks 1-16)
+
+A retrospective audit against `~/.claude/skills/ethra-nexus/karpathy-guidelines.md` and `CLAUDE.md §3.4` was performed on 2026-04-28 (mid-implementation). Full report: [`docs/superpowers/audits/2026-04-28-karpathy-audit-spec1.md`](../audits/2026-04-28-karpathy-audit-spec1.md).
+
+**Highlights** affecting remaining Tasks 17-32:
+
+| # | Finding | Action item |
+|---|---------|-------------|
+| K1 | **Budget tracking gap** — turn loop bypassa `agentsDb.canExecute / logProviderUsage / upsertBudget` (Q4 decisão de bypassar `ProviderRegistry`) | Inserir **Task 17.5** abaixo: pre-check + post-log + upsertBudget no turn loop |
+| K2 | Subagent-driven processo é overkill para projeto single-dev | Specs #2-5 usar inline execution. Não refaz Spec #1 |
+| K3 | Pre-plan audit não foi feito, capturou-se gaps durante implementação | Specs #2-5 fazer 15-20min de grep no codebase ANTES de escrever plano |
+| K4 | Migrations 021+022 nunca rodadas em DB nenhum | Antes de Task 17, aplicar migrations num DB de dev e rodar tests |
+
+## Task 17.5: Budget tracking integration (audit fix)
+
+> **AUDIT NOTE (K1)**: Insert before Task 17 starts. The turn loop calls Anthropic SDK directly, bypassing `ProviderRegistry`. That's correct (sensitive_data is always true), but means the central budget tracking pattern (canExecute/logProviderUsage/upsertBudget) won't be invoked unless we explicitly add it. Without this, AIOS Master spend is invisible to `provider_usage_log` and `budgets` tables.
+
+**Files:**
+- Modify: `packages/agents/src/lib/copilot/turn-loop.ts` (when created in Task 17, include this integration)
+- Modify: `packages/agents/src/__tests__/copilot-turn-loop.test.ts` (add test verifying canExecute called + logProviderUsage called)
+
+**Implementation requirements**:
+
+1. **Pre-check at start of `executeCopilotTurn`** (before opening SSE stream, before any Anthropic call):
+   ```typescript
+   import { createAgentsDb } from '../db/db-agents'
+   const agentsDb = createAgentsDb()
+   const month = new Date().toISOString().slice(0, 7)
+   const ESTIMATED_COST_PER_TURN = 0.05  // conservative pre-estimate
+   const check = await agentsDb.canExecute(p.aios_master_agent_id, month, ESTIMATED_COST_PER_TURN)
+   if (!check.allowed) {
+     p.sse.write({ type: 'error', code: 'BUDGET_EXCEEDED', message: check.reason ?? 'Budget exceeded' })
+     reply.raw.end()
+     return
+   }
+   ```
+
+2. **Post-message log** after each assistant message in the agentic loop (not just at turn_complete):
+   ```typescript
+   await agentsDb.logProviderUsage({
+     tenant_id: p.tenant_id,
+     agent_id: p.aios_master_agent_id,
+     skill_id: 'copilot:turn',  // synthetic skill_id for the copilot
+     provider: 'anthropic',
+     model: MODEL,
+     tokens_in: step.tokens_in,
+     tokens_out: step.tokens_out,
+     cost_usd: stepCost,
+     latency_ms: 0,  // or track per-step duration if useful
+     is_fallback: false,
+     is_sensitive: true,
+   })
+   await agentsDb.upsertBudget(p.aios_master_agent_id, p.tenant_id, month, stepCost, step.tokens_in + step.tokens_out)
+   ```
+
+3. **Test additions** in `copilot-turn-loop.test.ts`:
+   - `it('blocks turn when canExecute returns not allowed')` — mock returns `{ allowed: false, reason: 'monthly limit exceeded' }`. Assert SSE `error` event with `BUDGET_EXCEEDED`. Assert no Anthropic call made.
+   - `it('logs provider usage and updates budget after each assistant message')` — mock canExecute allowed, run turn with 1 assistant message. Assert `logProviderUsage` called with correct args. Assert `upsertBudget` called.
+
+4. **Type addition** to `ExecuteCopilotTurnParams`:
+   ```typescript
+   aios_master_agent_id: string  // resolved from tenant's aios-master agent in the route handler
+   ```
+
+5. **Where it fits in plan**: Task 17 creates the turn loop skeleton. Task 17.5 layers in budget integration. Task 18 layers tools. Task 19 layers caps. Task 20 layers auto-title. Sequential and stackable.
+
+6. **Commit**:
+   ```bash
+   git add packages/agents/src/lib/copilot/turn-loop.ts \
+           packages/agents/src/__tests__/copilot-turn-loop.test.ts
+   git commit -m "feat(copilot): turn loop budget integration (canExecute pre-check + logProviderUsage + upsertBudget)"
+   ```
+
+---
+
 ## File Structure
 
 ### Backend — `packages/db`
@@ -116,6 +191,7 @@ Tasks 22 and 23 carry inline AUDIT NOTE blocks reminding the implementer that te
 | 15 | Tool | `system:list_storage_alerts` (stub) |
 | 16 | Tool | All-tools array + getToolsForAnthropic + permission gate |
 | 17 | Loop | Turn loop core (text-only, no tools) |
+| 17.5 | Loop | **Budget integration** (audit fix K1 — see audit doc) |
 | 18 | Loop | Tool execution within turn |
 | 19 | Loop | Per-turn cost + tool count caps |
 | 20 | Loop | Auto-title fire-and-forget |
