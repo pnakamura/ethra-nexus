@@ -42,16 +42,17 @@ export async function executeToolCall<TInput, TOutput>(
 }
 
 // Anthropic tool schema format (subset of Anthropic.Tool)
+// Anthropic SDK requires input_schema.type === 'object' literal.
 export interface AnthropicToolSchema {
   name: string
   description: string
-  input_schema: JSONSchema7
+  input_schema: JSONSchema7 & { type: 'object' }
 }
 
 export function getToolsForAnthropic(tools: CopilotTool[]): AnthropicToolSchema[] {
   return tools.map(t => ({
     name: t.name,
     description: t.description,
-    input_schema: t.input_schema,
+    input_schema: { ...t.input_schema, type: 'object' as const },
   }))
 }
