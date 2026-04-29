@@ -1,4 +1,5 @@
 import type { JSONSchema7 } from 'json-schema'
+import type Anthropic from '@anthropic-ai/sdk'
 
 export interface ToolContext {
   tenant_id: string
@@ -41,18 +42,14 @@ export async function executeToolCall<TInput, TOutput>(
   }
 }
 
-// Anthropic tool schema format (subset of Anthropic.Tool)
-// Anthropic SDK requires input_schema.type === 'object' literal.
-export interface AnthropicToolSchema {
-  name: string
-  description: string
-  input_schema: JSONSchema7 & { type: 'object' }
-}
+// Use Anthropic SDK's Tool type directly. Our JSONSchema7-typed input_schema
+// satisfies the runtime shape but TS can't prove the index signature, so cast.
+export type AnthropicToolSchema = Anthropic.Tool
 
-export function getToolsForAnthropic(tools: CopilotTool[]): AnthropicToolSchema[] {
+export function getToolsForAnthropic(tools: CopilotTool[]): Anthropic.Tool[] {
   return tools.map(t => ({
     name: t.name,
     description: t.description,
-    input_schema: { ...t.input_schema, type: 'object' as const },
+    input_schema: t.input_schema as unknown as Anthropic.Tool['input_schema'],
   }))
 }
