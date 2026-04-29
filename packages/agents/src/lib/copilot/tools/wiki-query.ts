@@ -58,7 +58,7 @@ export const wikiQueryTool: CopilotTool<WikiQueryInput, WikiQueryOutput> = {
     }
 
     const sources: Array<WikiSource & { content: string }> = []
-    for (const r of strategicRows.rows as WikiRow[]) {
+    for (const r of strategicRows.rows as unknown as WikiRow[]) {
       if (r.similarity > 0.4) {
         sources.push({ title: r.title, slug: r.slug, similarity: Number(r.similarity), scope: 'strategic', content: r.content })
       }
@@ -75,7 +75,7 @@ export const wikiQueryTool: CopilotTool<WikiQueryInput, WikiQueryOutput> = {
         ORDER BY wap.embedding <=> ${vectorStr}::vector
         LIMIT 3
       `)
-      for (const r of agentRows.rows as WikiRow[]) {
+      for (const r of agentRows.rows as unknown as WikiRow[]) {
         if (r.similarity > 0.4) {
           sources.push({ title: r.title, slug: r.slug, similarity: Number(r.similarity), scope: 'agent', content: r.content })
         }
