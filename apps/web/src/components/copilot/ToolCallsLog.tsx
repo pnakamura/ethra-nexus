@@ -24,7 +24,7 @@ function extractToolCalls(messages: CopilotMessage[]): ToolCallView[] {
     if (m.role !== 'user') continue
     for (const block of m.content) {
       if (block.type === 'tool_result') {
-        const tu = block as { tool_use_id: string; content: string; is_error?: boolean }
+        const tu = block as unknown as { tool_use_id: string; content: string; is_error?: boolean }
         resultMap.set(tu.tool_use_id, { content: tu.content, isError: tu.is_error ?? false })
       }
     }
@@ -34,7 +34,7 @@ function extractToolCalls(messages: CopilotMessage[]): ToolCallView[] {
     if (m.role !== 'assistant') continue
     for (const block of m.content) {
       if (block.type !== 'tool_use') continue
-      const tu = block as { id: string; name: string; input?: Record<string, unknown> }
+      const tu = block as unknown as { id: string; name: string; input?: Record<string, unknown> }
       const r = resultMap.get(tu.id)
       let parsedResult: unknown = r?.content ?? null
       try { if (r?.content) parsedResult = JSON.parse(r.content.replace(/^<tool_output[^>]*>\n?|\n?<\/tool_output>$/g, '')) } catch { /* keep as string */ }
