@@ -8,7 +8,17 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "PORT",
+        "NODE_ENV",
+        "VITE_API_URL"
+      ]
     },
     "test": {
       "dependsOn": ["^build"],
