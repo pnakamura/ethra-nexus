@@ -30,12 +30,12 @@ vi.mock('drizzle-orm', () => ({
 
 const { copilotRoutes } = await import('../routes/copilot')
 
-async function buildApp(userEmail: string, tenantId: string, role: 'admin' | 'member' = 'admin'): Promise<FastifyInstance> {
+async function buildApp(userSlug: string, tenantId: string, role: 'admin' | 'member' = 'admin'): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   app.addHook('onRequest', async (request) => {
     request.tenantId = tenantId
-    ;(request as { user?: { tenantId: string; email: string; role: string } }).user = {
-      tenantId, email: userEmail, role,
+    ;(request as { user?: { tenantId: string; slug: string; role: string } }).user = {
+      tenantId, slug: userSlug, role,
     }
   })
   await app.register(copilotRoutes, { prefix: '/api/v1' })

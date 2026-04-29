@@ -7,7 +7,7 @@ import { executeCopilotTurn, generateAutoTitle, AIOS_MASTER_SYSTEM_PROMPT } from
 
 declare module 'fastify' {
   interface FastifyRequest {
-    userEmail?: string
+    userSlug?: string
     userRole?: 'admin' | 'member'
   }
 }
@@ -15,16 +15,16 @@ declare module 'fastify' {
 // Per-conversation lock to block overlapping turns. In-memory; sufficient for single-instance.
 const turnLocks = new Set<string>()
 
-// Audit-revised (2026-04-28): JWT da casa contém { tenantId, email, role }.
-// MVP é admin-only — sem lookup em tenant_members (table existe em SQL mas
-// não é queryable pelo app code; per-user opt-in defere até JWT ter user identity).
+// JWT actual shape (auth.ts:37-40): { tenantId, slug, role: 'admin' }.
+// No email/sub field. We use slug as the user identity (1 user per tenant
+// in current model) and gate on role === 'admin' for the copilot.
 async function requireCopilotAccess(request: FastifyRequest, reply: FastifyReply) {
-  const user = request.user as { tenantId?: string; email?: string; role?: string } | undefined
-  if (!user?.email) return reply.status(401).send({ error: 'Unauthorized' })
+  const user = request.user as { tenantId?: string; slug?: string; role?: string } | undefined
+  if (!user?.slug) return reply.status(401).send({ error: 'Unauthorized' })
   if (user.role !== 'admin') {
     return reply.status(403).send({ error: 'Copilot is admin-only' })
   }
-  request.userEmail = user.email
+  request.userSlug = user.slug
   request.userRole = user.role as 'admin' | 'member'
 }
 
@@ -32,7 +32,7 @@ export async function copilotRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireCopilotAccess)
 
   app.get('/copilot/health', async (request) => {
-    return { ok: true, user_email: request.userEmail, role: request.userRole }
+    return { ok: true, user_slug: request.userSlug, role: request.userRole }
   })
 
   // POST /copilot/conversations — create a new thread
@@ -46,7 +46,7 @@ export async function copilotRoutes(app: FastifyInstance) {
 
     const inserted = await db.insert(copilotConversations).values({
       tenant_id: request.tenantId,
-      user_id: request.userEmail!,
+      user_id: request.userSlug!,
       agent_id: aios[0].id,
       title: null,
       status: 'active',
@@ -62,7 +62,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       const limit = Math.min(parseInt(request.query.limit ?? '50', 10), 100)
       const conditions = [
         eq(copilotConversations.tenant_id, request.tenantId),
-        eq(copilotConversations.user_id, request.userEmail!),
+        eq(copilotConversations.user_id, request.userSlug!),
       ]
       if (request.query.status) conditions.push(eq(copilotConversations.status, request.query.status))
 
@@ -82,7 +82,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       .from(copilotConversations)
       .where(and(
         eq(copilotConversations.id, request.params.id),
-        eq(copilotConversations.user_id, request.userEmail!),
+        eq(copilotConversations.user_id, request.userSlug!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .limit(1)
@@ -109,7 +109,7 @@ export async function copilotRoutes(app: FastifyInstance) {
         .set(updates)
         .where(and(
           eq(copilotConversations.id, request.params.id),
-          eq(copilotConversations.user_id, request.userEmail!),
+          eq(copilotConversations.user_id, request.userSlug!),
           eq(copilotConversations.tenant_id, request.tenantId),
         ))
         .returning()
@@ -125,7 +125,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       .set({ status: 'archived', updated_at: new Date() })
       .where(and(
         eq(copilotConversations.id, request.params.id),
-        eq(copilotConversations.user_id, request.userEmail!),
+        eq(copilotConversations.user_id, request.userSlug!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .returning()
@@ -152,7 +152,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       .from(copilotConversations)
       .where(and(
         eq(copilotConversations.id, id),
-        eq(copilotConversations.user_id, request.userEmail!),
+        eq(copilotConversations.user_id, request.userSlug!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .limit(1)
@@ -191,7 +191,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       await executeCopilotTurn({
         conversation_id: id,
         tenant_id: request.tenantId,
-        user_id: request.userEmail!,
+        user_id: request.userSlug!,
         user_role: request.userRole!,
         aios_master_agent_id: conv.agent_id,
         content,
