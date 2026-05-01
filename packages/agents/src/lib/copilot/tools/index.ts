@@ -8,6 +8,7 @@ import { agentHealthTool } from './agent-health'
 import { listPendingApprovalsTool } from './list-pending-approvals'
 import { wikiQueryTool } from './wiki-query'
 import { listStorageAlertsTool } from './list-storage-alerts'
+import { getStorageUsageTool } from './get-storage-usage'
 
 export const allCopilotTools: CopilotTool[] = [
   listAgentsTool,
@@ -19,6 +20,7 @@ export const allCopilotTools: CopilotTool[] = [
   listPendingApprovalsTool,
   wikiQueryTool,
   listStorageAlertsTool,
+  getStorageUsageTool,
 ] as CopilotTool[]
 
 // Anthropic returns tool_use.name with ':' transformed to '_' (see getToolsForAnthropic).
