@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import multipart from '@fastify/multipart'
-import { eq, sql } from 'drizzle-orm'
+import { eq, and, desc, sql } from 'drizzle-orm'
 import { getDb, files, tenants, auditLog } from '@ethra-nexus/db'
 import { createStorageDriver } from '@ethra-nexus/agents'
 import { sanitizeForHtml, validateMimeType, validateExpiresAt } from '@ethra-nexus/core'
@@ -138,5 +138,32 @@ export async function fileRoutes(app: FastifyInstance) {
       download_url,
       expires_at: expires_at?.toISOString() ?? null,
     })
+  })
+
+  // GET /files/:id/download
+  app.get<{ Params: { id: string } }>('/files/:id/download', async (request, reply) => {
+    const db = getDb()
+    const driver = createStorageDriver()
+    const rows = await db.select({
+      storage_key: files.storage_key,
+      mime_type: files.mime_type,
+      original_filename: files.original_filename,
+    }).from(files)
+      .where(and(eq(files.id, request.params.id), eq(files.tenant_id, request.tenantId)))
+      .limit(1)
+
+    const row = rows[0]
+    if (!row) return reply.status(404).send({ error: 'FILE_NOT_FOUND', message: 'File not found' })
+
+    const stream = await driver.get(row.storage_key)
+    if (!stream) {
+      request.log.error({ storage_key: row.storage_key }, 'STORAGE_ORPHAN — db row without driver bytes')
+      return reply.status(500).send({ error: 'STORAGE_ORPHAN', message: 'File metadata exists but bytes missing' })
+    }
+
+    const filename = row.original_filename ?? 'file'
+    reply.header('Content-Type', row.mime_type)
+    reply.header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
+    return reply.send(stream)
   })
 }
