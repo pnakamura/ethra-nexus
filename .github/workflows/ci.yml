@@ -166,7 +166,10 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          # GITHUB_TOKEN is auto-rotated per workflow run — no PAT maintenance.
+          # The job already grants `permissions: packages: write` (above), so the
+          # default token has scope to push to ghcr.io/<owner>/<repo>.
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
