@@ -5,6 +5,25 @@ import { executeTask } from '../aios/aios-master'
 import { dispatchOutput } from './output-dispatcher'
 import { calcNextRun } from './cron-utils'
 import { drainEventQueue } from './event-bus'
+import { createStorageDriver, cleanupExpiredFiles } from '../storage'
+import { computeStorageAlerts } from '../alerts'
+
+let lastMaintenanceAt: number = 0
+const MAINTENANCE_INTERVAL_MS = 24 * 60 * 60 * 1000  // 24h
+
+async function runDailyMaintenanceIfDue(): Promise<void> {
+  const now = Date.now()
+  if (now - lastMaintenanceAt < MAINTENANCE_INTERVAL_MS) return
+  lastMaintenanceAt = now
+  try {
+    const driver = createStorageDriver()
+    const files_deleted = await cleanupExpiredFiles(driver)
+    const alerts = await computeStorageAlerts()
+    console.log('[scheduler] daily maintenance:', { files_deleted, alerts })
+  } catch (e) {
+    console.error('[scheduler] maintenance failed:', e)
+  }
+}
 
 export function startSchedulerLoop(intervalMs = 60_000): ReturnType<typeof setInterval> {
   return setInterval(() => {
@@ -13,6 +32,7 @@ export function startSchedulerLoop(intervalMs = 60_000): ReturnType<typeof setIn
 }
 
 async function runTick(): Promise<void> {
+  await runDailyMaintenanceIfDue()
   await Promise.allSettled([
     runDueSchedules(),
     processEventQueue(),
