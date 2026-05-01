@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ConversationsSidebar } from '@/components/copilot/ConversationsSidebar'
 import { ChatView } from '@/components/copilot/ChatView'
 import { ToolCallsLog } from '@/components/copilot/ToolCallsLog'
@@ -7,8 +7,24 @@ import { useCopilotConversation, useSendCopilotMessage } from '@/hooks/useCopilo
 
 export function CopilotPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null)
   const { data } = useCopilotConversation(selectedId)
   const stream = useSendCopilotMessage(selectedId)
+
+  // Auto-send a queued prompt once selectedId is bound and the streaming
+  // hook has re-initialized for the new conversation.
+  useEffect(() => {
+    if (selectedId && pendingPrompt) {
+      const p = pendingPrompt
+      setPendingPrompt(null)
+      stream.send(p)
+    }
+  }, [selectedId, pendingPrompt, stream])
+
+  function handleSelectAndPrompt(id: string, prompt: string) {
+    setSelectedId(id)
+    setPendingPrompt(prompt)
+  }
 
   return (
     <div
@@ -18,9 +34,9 @@ export function CopilotPage() {
       <ConversationsSidebar selectedId={selectedId} onSelect={setSelectedId} />
 
       {selectedId ? (
-        <ChatView conversationId={selectedId} />
+        <ChatView conversationId={selectedId} stream={stream} />
       ) : (
-        <EmptyState onSelectConversation={setSelectedId} />
+        <EmptyState onSelectAndPrompt={handleSelectAndPrompt} />
       )}
 
       <ToolCallsLog

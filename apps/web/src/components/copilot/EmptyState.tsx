@@ -1,7 +1,5 @@
 import { Sparkles } from 'lucide-react'
 import { useCreateCopilotConversation } from '@/hooks/useCopilot'
-import { streamCopilotMessage } from '@/lib/copilot-stream'
-import { STORAGE_KEY } from '@/contexts/AuthContext'
 
 const STARTER_PROMPTS = [
   'Quais agentes estão ativos?',
@@ -11,21 +9,17 @@ const STARTER_PROMPTS = [
 ]
 
 interface Props {
-  onSelectConversation: (id: string) => void
+  onSelectAndPrompt: (id: string, prompt: string) => void
 }
 
-export function EmptyState({ onSelectConversation }: Props) {
+export function EmptyState({ onSelectAndPrompt }: Props) {
   const create = useCreateCopilotConversation()
 
   async function handleChip(prompt: string) {
     const conv = await create.mutateAsync()
-    onSelectConversation(conv.id)
-    // Send via the streaming hook bound to the new conversation.
-    // Using a microtask to allow the parent to update selected state.
-    setTimeout(() => {
-      const sender = createOneShotSender(conv.id)
-      sender.send(prompt)
-    }, 50)
+    // Parent owns the streaming hook, so it'll dispatch the send once
+    // selectedId is bound to the new conversation.
+    onSelectAndPrompt(conv.id, prompt)
   }
 
   return (
@@ -51,23 +45,4 @@ export function EmptyState({ onSelectConversation }: Props) {
       </div>
     </div>
   )
-}
-
-// Minimal one-shot sender that doesn't need a React render cycle to be bound.
-function createOneShotSender(conversationId: string) {
-  return {
-    send: async (content: string) => {
-      try {
-        await streamCopilotMessage(
-          conversationId,
-          content,
-          () => undefined,
-          new AbortController().signal,
-          () => localStorage.getItem(STORAGE_KEY),
-        )
-      } catch {
-        /* ignored — list refetch will surface result */
-      }
-    },
-  }
 }

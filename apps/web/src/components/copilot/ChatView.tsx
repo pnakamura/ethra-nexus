@@ -1,16 +1,16 @@
-import { useCopilotConversation, useSendCopilotMessage } from '@/hooks/useCopilot'
+import { useCopilotConversation, type useSendCopilotMessage } from '@/hooks/useCopilot'
 import { Skeleton } from '@/components/ui/skeleton'
 import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
 
 interface Props {
   conversationId: string
+  stream: ReturnType<typeof useSendCopilotMessage>
   onToolClick?: (toolUseId: string) => void
 }
 
-export function ChatView({ conversationId, onToolClick }: Props) {
+export function ChatView({ conversationId, stream, onToolClick }: Props) {
   const { data, isLoading } = useCopilotConversation(conversationId)
-  const stream = useSendCopilotMessage(conversationId)
 
   if (isLoading) {
     return <div className="flex-1 p-5 flex flex-col gap-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
