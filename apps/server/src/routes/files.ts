@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import multipart from '@fastify/multipart'
+import { randomUUID } from 'crypto'
 import { eq, and, desc, sql } from 'drizzle-orm'
 import { getDb, files, tenants, auditLog } from '@ethra-nexus/db'
 import { createStorageDriver } from '@ethra-nexus/agents'
@@ -88,7 +89,7 @@ export async function fileRoutes(app: FastifyInstance) {
     }
 
     // Generate file_id and persist via driver
-    const file_id = crypto.randomUUID()
+    const file_id = randomUUID()
     let putResult: { storage_key: string; size_bytes: number; sha256: string }
     try {
       putResult = await driver.put({ tenant_id: request.tenantId, file_id, bytes: buf, mime_type })
