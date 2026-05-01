@@ -165,12 +165,16 @@ export async function copilotRoutes(app: FastifyInstance) {
     if (turnLocks.has(id)) return reply.status(409).send({ error: 'TURN_IN_PROGRESS' })
     turnLocks.add(id)
 
-    // Open SSE stream
+    // Open SSE stream. reply.raw bypasses @fastify/cors so we set headers manually.
+    const origin = (request.headers.origin as string | undefined) ?? '*'
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Credentials': 'true',
+      'Vary': 'Origin',
     })
 
     const sseWrite = (event: { type: string; [k: string]: unknown }) => {
