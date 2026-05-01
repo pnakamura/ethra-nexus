@@ -46,9 +46,11 @@ export async function executeToolCall<TInput, TOutput>(
 // satisfies the runtime shape but TS can't prove the index signature, so cast.
 export type AnthropicToolSchema = Anthropic.Tool
 
+// Anthropic tool names must match ^[a-zA-Z0-9_-]{1,128}$ — colons rejected.
+// Transform `:` → `_` at the boundary (e.g. system:list_agents → system_list_agents).
 export function getToolsForAnthropic(tools: CopilotTool[]): Anthropic.Tool[] {
   return tools.map(t => ({
-    name: t.name,
+    name: t.name.replace(/:/g, '_'),
     description: t.description,
     input_schema: t.input_schema as unknown as Anthropic.Tool['input_schema'],
   }))

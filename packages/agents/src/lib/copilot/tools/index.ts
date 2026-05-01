@@ -21,6 +21,8 @@ export const allCopilotTools: CopilotTool[] = [
   listStorageAlertsTool,
 ] as CopilotTool[]
 
+// Anthropic returns tool_use.name with ':' transformed to '_' (see getToolsForAnthropic).
+// Match either the original name or the Anthropic-normalized form.
 export function findToolByName(name: string): CopilotTool | undefined {
-  return allCopilotTools.find(t => t.name === name)
+  return allCopilotTools.find(t => t.name === name || t.name.replace(/:/g, '_') === name)
 }
