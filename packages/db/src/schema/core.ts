@@ -7,6 +7,7 @@ import {
   integer,
   numeric,
   boolean,
+  bigint,
   uniqueIndex,
   unique,
   index,
@@ -32,6 +33,7 @@ export const tenants = pgTable('tenants', {
   plan: text('plan').notNull().default('self-hosted'),
   settings: jsonb('settings').default({}),
   is_active: boolean('is_active').notNull().default(true),
+  storage_limit_bytes: bigint('storage_limit_bytes', { mode: 'number' }),  // ← NEW (migration 023)
   created_at: timestamp('created_at').defaultNow().notNull(),
   updated_at: timestamp('updated_at').defaultNow().notNull(),
 })
