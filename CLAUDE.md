@@ -19,14 +19,20 @@ e gerencia processos reais de negócio, com conhecimento persistente e rastreáv
 ## 2. Stack e repositório
 
 ```
-Monorepo: apps/web + packages/core + packages/agents + packages/wiki
-Frontend:  React 18 + TypeScript 5 (strict) + Vite
-Backend:   Supabase (PostgreSQL + Auth + Storage + pgvector + RLS)
-Automação: N8N (workflows de agentes)
-Wiki UI:   SilverBullet
+Monorepo: apps/web + apps/server + packages/core + packages/db + packages/agents + packages/wiki
+Frontend:  React 18 + TypeScript 5 (strict) + Vite + TanStack Query + Radix UI + Tailwind
+Backend:   Fastify 5 + Drizzle ORM + Postgres (pgvector + RLS) + JWT
+Scheduler: startSchedulerLoop em @ethra-nexus/agents (chamado pelo apps/server)
+Wiki UI:   SilverBullet (opcional, container separado)
 AI:        Anthropic (dados sensíveis) + OpenRouter (Groq, Gemini — custo)
 Infra:     Docker Compose + Easypanel + GitHub Actions
+N8N:       opcional — usado apenas para skills custom externas
 ```
+
+> Histórico: o backend foi originalmente projetado sobre Supabase (`@supabase/supabase-js`)
+> e migrado para Fastify + Drizzle conectando direto ao Postgres. RLS e pgvector
+> permanecem como features do Postgres. As migrations em `infra/supabase/migrations/`
+> ainda usam o nome legado mas são SQL puro aplicável a qualquer Postgres.
 
 ---
 
@@ -78,24 +84,47 @@ Zero uso de `any` explícito. Zero `as unknown as X` sem justificativa.
 ```
 ethra-nexus/
 ├── apps/
-│   └── web/                    ← React 18 + TypeScript (frontend)
+│   ├── web/                    ← React 18 + Vite (frontend)
+│   └── server/                 ← Fastify 5 (API HTTP + scheduler)
+│       └── src/routes/         ← agents, aios, wiki, schedules, webhooks, a2a, wizard, …
 ├── packages/
-│   ├── core/                   ← tipos compartilhados (sem dependências externas)
-│   ├── agents/                 ← AIOS Master + ProviderRegistry
+│   ├── core/                   ← tipos + security/ (validate, sanitize, rate-limiter)
+│   ├── db/                     ← Drizzle schema (core, wiki, aios, wizard, schedules) + pg client
+│   ├── agents/                 ← AIOS Master + ProviderRegistry + scheduler loop
 │   └── wiki/                   ← engine de wiki (ingest, query, lint)
 ├── infra/
 │   ├── docker/                 ← Dockerfile + docker-compose dev/prod
-│   ├── supabase/migrations/    ← SQL migrations numeradas
-│   └── n8n/workflows/          ← workflows N8N exportados em JSON
+│   ├── vps/                    ← compose e env específicos do deploy VPS/Hostgator
+│   ├── supabase/migrations/    ← SQL migrations numeradas (nome legado; é Postgres puro)
+│   └── n8n/workflows/          ← workflows N8N exportados em JSON (skills custom)
 ├── wikis/
-│   ├── _system/                ← System Wiki (Tier 0)
-│   └── agent-{slug}/           ← Agent Wiki (Tier 1) — criado por agente
+│   ├── _system/                ← System Wiki (Tier 0) — possui schema/CLAUDE.md próprio
+│   └── agent-{slug}/           ← Agent Wiki (Tier 1) — possui schema/CLAUDE.md próprio
 ├── docs/
-│   └── adr/                    ← Architecture Decision Records
+│   ├── design-system.md        ← ETHRA APERTURE — identidade visual canônica
+│   ├── superpowers/plans/      ← planos de implementação por sprint
+│   └── adr/                    ← Architecture Decision Records (a criar)
 ├── .github/workflows/          ← CI pipeline
 ├── CLAUDE.md                   ← este arquivo
 └── .env.example
 ```
+
+### 4.1 Isolamento por tenant (padrão obrigatório no backend)
+
+`apps/server/src/app.ts` registra `@fastify/jwt` e estende `FastifyRequest` com
+`tenantId: string`. Um hook global lê o JWT, resolve o tenant e injeta o ID na
+request. **Toda query Drizzle deve filtrar por `tenantId`** — não confie em RLS
+sozinho como rede de segurança no nível da aplicação. Pesquise por handlers
+existentes em `apps/server/src/routes/` antes de criar uma rota nova; o padrão é:
+
+```ts
+app.get('/agents', async (req) => {
+  return db.select().from(agents).where(eq(agents.tenantId, req.tenantId))
+})
+```
+
+`wikis/_system/schema/CLAUDE.md` e `wikis/agent-template/schema/CLAUDE.md` são
+constituições de escopo menor para a engine de wiki — leia-as ao tocar em ingest/query.
 
 ---
 
@@ -131,8 +160,12 @@ Skills built-in do Ethra Nexus:
 | `monitor:alert` | Avalia condições e dispara alertas | Groq/OpenRouter |
 | `data:analyze` | Analisa dados estruturados | Gemini/OpenRouter |
 | `data:extract` | Extrai dados de documentos | Anthropic |
+| `a2a:call` | Chama agente externo via protocolo A2A | (delegado) |
 
 Skills custom: `custom:{nome}` — implementadas via N8N workflows.
+
+**Adicional (Spec #1):** `copilot:turn` — skill interna do AIOS Master Agent
+shell, registrada em `provider_usage_log` quando o `/copilot` é usado.
 
 **Não existem "tipos de agente" hardcoded.** Um agente de "atendimento" é simplesmente
 um agente com skills `wiki:query` + `channel:respond` e canais WhatsApp/webchat.
@@ -201,9 +234,16 @@ Regra inviolável: `sensitive_data: true` → sempre Anthropic direto.
 
 ### 5.6 Wiki Engine (packages/wiki)
 
-- **ingest.ts**: processa raw/ → gera páginas wiki → embeddings
-- **query.ts**: busca semântica → síntese com citação
-- **lint.ts**: auditoria periódica → score de saúde
+`packages/wiki` é **pure logic, sem dependência de DB**. Expõe três funções:
+
+- **`embed()`** (em `embedding.ts`): vetorização via OpenAI `text-embedding-3-small` (1536 dims)
+- **`extractPagesFromContent()`** (em `extract.ts`): extração LLM-powered — split de documento bruto em `ExtractedPage[]`
+- **`generateStrategicIndex()`** (em `index-generator.ts`): produz `PageSummary[]` para navegação
+
+A lógica de **ingest / query / lint** vive em `apps/server/src/routes/wiki.ts` e nas
+skills em `packages/agents/src/lib/skills/skill-executor.ts` (`executeWikiQuery`,
+`executeWikiIngest`, `executeWikiLint`). O CLAUDE.md original previa esses módulos
+em `packages/wiki/` mas a implementação distribuiu pelo backend e skills.
 
 ---
 
@@ -211,17 +251,38 @@ Regra inviolável: `sensitive_data: true` → sempre Anthropic direto.
 
 | Tabela | Propósito |
 |--------|-----------|
-| `tenants` | Organizações — isolamento multi-tenant |
-| `tenant_members` | Usuários por tenant com roles |
-| `agents` | Agentes configurados (5 dimensões em JSONB) |
-| `agent_budget_periods` | Histórico mensal de gastos por agente |
-| `agent_conversations` | Histórico de conversas |
-| `agent_messages` | Mensagens individuais (com cost_usd) |
+| `tenants` | Organizações — isolamento multi-tenant; auth via `slug` + `password_hash` (bcrypt) |
+| `agents` | Agentes configurados (identidade + provider + status + flat fields) |
+| `agent_skills` | Skills habilitadas por agente (com `provider_override` opcional) |
+| `agent_channels` | Canais de comunicação por agente (WhatsApp, webchat, email) |
+| `agent_schedules` | Cron schedules por agente |
+| `agent_event_subscriptions` | Subscrições multi-agent a eventos do sistema |
+| `scheduled_results` | Histórico de execução dos schedules |
+| `tickets` | Tarefas atômicas com rastreamento de custo |
+| `goals` | Hierarquia C→P→SP→PT |
+| `sessions` | Contexto persistente entre heartbeats |
+| `budgets` | Orçamento mensal por agente (`agent_id, month` único) |
+| `provider_usage_log` | Observabilidade de custo por chamada LLM |
+| `audit_log` | Registro imutável (LGPD) |
+| `aios_events` | Log de execução do orquestrador (com `call_depth`) |
+| `wiki_strategic_pages` | Wiki estratégica (compartilhada por tenant) com embeddings 1536-dim |
+| `wiki_agent_pages` | Wiki individual por agente |
 | `wiki_raw_sources` | Fontes brutas (imutáveis) |
-| `wiki_pages` | Conhecimento compilado + embeddings |
-| `wiki_operation_log` | Log append-only de operações |
-| `aios_events` | Log de execução do orquestrador |
-| `provider_usage_log` | Observabilidade de custo de AI |
+| `wiki_agent_writes` | Propostas HITL de escrita pendentes/aprovadas |
+| `wiki_operations_log` | Log append-only de operações de wiki |
+| `clone_wizard_sessions` | Estado do wizard de criação de agente |
+| `agent_feedback` | Avaliações de qualidade |
+| `org_chart` | Hierarquia de reporte entre agentes |
+| `a2a_api_keys` | Autenticação M2M para chamadas A2A inbound |
+| `external_agents` | Registry de agentes A2A externos |
+| `copilot_conversations` | Threads do AIOS Master shell (admin-only) |
+| `copilot_messages` | Mensagens (Anthropic content blocks JSONB) |
+| `copilot_tool_calls` | Tool calls executadas durante turn loop |
+
+**Não existem `tenant_members`, `agent_conversations`, `agent_messages`, `wiki_pages`,
+`agent_budget_periods` nem `wiki_operation_log` (singular).** Em rascunhos antigos
+estes nomes apareceram mas a implementação consolidou em outros nomes (acima).
+Modelo efetivo: **1 user = 1 tenant** (login por slug + senha do tenant).
 
 ---
 
@@ -301,21 +362,65 @@ grep -rn "JSON.parse" --include="*.ts" packages/ | grep -v "safeJsonParse"
 ## 8. Comandos essenciais
 
 ```bash
-# Desenvolvimento
-npm run dev          # inicia todos os apps (Turbo)
+# Desenvolvimento (raiz — orquestrado por Turbo, respeita ^build)
+npm run dev          # inicia todos os apps em watch mode
 npm run typecheck    # TypeScript check em todos os packages
 npm run lint         # ESLint em todos os packages
 npm run test         # Vitest em todos os packages
+npm run test:e2e     # Playwright (apps/web) + e2e backend
 npm run build        # build de produção
+npm run clean        # limpa dist/ de todos os workspaces
+```
 
-# Docker
-docker compose -f infra/docker/docker-compose.dev.yml up -d   # dev
-docker compose -f infra/docker/docker-compose.prod.yml up -d  # prod
+### 8.1 Rodar comando em UM workspace só
 
-# Supabase
-npx supabase start                    # local dev
-npx supabase db push                  # push para remote
-npx supabase migration new [nome]     # nova migration
+```bash
+# por nome do workspace (npm)
+npm run -w @ethra-nexus/server typecheck
+npm run -w @ethra-nexus/web   build
+
+# por filtro Turbo (resolve dependências antes — ex: builda packages/db primeiro)
+npx turbo run test --filter=@ethra-nexus/server
+npx turbo run typecheck --filter=@ethra-nexus/web...   # ... = inclui dependentes
+```
+
+### 8.2 Rodar UM teste específico
+
+```bash
+# um arquivo
+npm run -w @ethra-nexus/server test -- src/__tests__/e2e/agents.test.ts
+
+# por nome do teste (substring do describe/it)
+npm run -w @ethra-nexus/server test -- -t "creates agent"
+
+# watch mode (apenas no workspace alvo)
+npm run -w @ethra-nexus/web test:watch
+```
+
+### 8.3 Rodar testes/CI sem gastar API credit
+
+```bash
+# Mockа todas as chamadas de LLM (Anthropic, OpenRouter, OpenAI embeddings)
+NEXUS_MOCK_LLM=true npm run test
+```
+Os e2e do backend dependem disso — sempre defina antes de `test:e2e`.
+
+### 8.4 Banco e migrations
+
+```bash
+# Drizzle (schema vive em packages/db/src/schema/*)
+npm run -w @ethra-nexus/db generate   # gera migration a partir de mudanças no schema
+npm run -w @ethra-nexus/db migrate    # aplica migrations no DATABASE_URL atual
+```
+Migrations SQL legadas em `infra/supabase/migrations/` são aplicadas por
+`infra/docker/` na subida do Postgres. Novas migrations devem ir via Drizzle.
+
+### 8.5 Docker
+
+```bash
+docker compose -f infra/docker/docker-compose.dev.yml  up -d   # dev local
+docker compose -f infra/docker/docker-compose.prod.yml up -d   # prod genérico
+docker compose -f infra/vps/docker-compose.vps.yml     up -d   # VPS Hostgator
 ```
 
 ---
@@ -333,8 +438,10 @@ npx supabase migration new [nome]     # nova migration
 
 ## 10. ADRs relevantes
 
-- `docs/adr/ADR-001-monorepo-turborepo.md`
-- `docs/adr/ADR-002-supabase-over-firebase.md`
-- `docs/adr/ADR-003-silverbullet-wiki.md`
-- `docs/adr/ADR-004-multi-provider-openrouter.md`
-- `docs/adr/ADR-005-modelo-c-hybrid-deployment.md`
+> Pendentes de criação — manter esta lista como índice das decisões a documentar.
+
+- `docs/adr/ADR-001-monorepo-turborepo.md` _(planejado)_
+- `docs/adr/ADR-002-fastify-drizzle-over-supabase.md` — registra a migração saindo de `@supabase/supabase-js` para Fastify + Drizzle direto no Postgres ✅
+- `docs/adr/ADR-003-silverbullet-wiki.md` _(planejado)_
+- `docs/adr/ADR-004-multi-provider-openrouter.md` _(planejado)_
+- `docs/adr/ADR-005-modelo-c-hybrid-deployment.md` _(planejado)_
