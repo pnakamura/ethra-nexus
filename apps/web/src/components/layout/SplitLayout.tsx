@@ -67,7 +67,7 @@ export function SplitLayout({
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       setPanelWidth(w => {
-        try { localStorage.setItem(widthKey, String(w)) } catch {}
+        try { localStorage.setItem(widthKey, String(w)) } catch { /* localStorage may be disabled */ }
         return w
       })
     }
@@ -82,7 +82,7 @@ export function SplitLayout({
   const toggleCollapsed = () => {
     setCollapsed(v => {
       const next = !v
-      try { localStorage.setItem(collapsedKey, String(next)) } catch {}
+      try { localStorage.setItem(collapsedKey, String(next)) } catch { /* localStorage may be disabled */ }
       return next
     })
   }

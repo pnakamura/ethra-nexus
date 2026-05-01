@@ -18,8 +18,8 @@ describe('parseSSEChunks', () => {
 
   it('combines buffered + new chunks across boundary', () => {
     const events: object[] = []
-    let buf = parseSSEChunks('data: {"type":"text', '', e => events.push(e))
-    buf = parseSSEChunks('_delta","delta":"hello"}\n\n', buf, e => events.push(e))
+    const buf = parseSSEChunks('data: {"type":"text', '', e => events.push(e))
+    parseSSEChunks('_delta","delta":"hello"}\n\n', buf, e => events.push(e))
     expect(events).toEqual([{ type: 'text_delta', delta: 'hello' }])
   })
 
