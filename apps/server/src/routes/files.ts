@@ -166,4 +166,64 @@ export async function fileRoutes(app: FastifyInstance) {
     reply.header('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
     return reply.send(stream)
   })
+
+  // GET /files (list with optional filters)
+  app.get<{ Querystring: { limit?: string; offset?: string; mime_type?: string } }>(
+    '/files',
+    async (request) => {
+      const db = getDb()
+      const limit = Math.min(Math.max(parseInt(request.query.limit ?? '50', 10) || 50, 1), 200)
+      const offset = Math.max(parseInt(request.query.offset ?? '0', 10) || 0, 0)
+
+      const where = request.query.mime_type
+        ? and(eq(files.tenant_id, request.tenantId), eq(files.mime_type, request.query.mime_type))
+        : eq(files.tenant_id, request.tenantId)
+
+      const rows = await db.select({
+        id: files.id,
+        original_filename: files.original_filename,
+        mime_type: files.mime_type,
+        size_bytes: files.size_bytes,
+        sha256: files.sha256,
+        expires_at: files.expires_at,
+        created_at: files.created_at,
+      })
+        .from(files)
+        .where(where)
+        .orderBy(desc(files.created_at))
+        .limit(limit)
+        .offset(offset)
+
+      return { data: rows }
+    },
+  )
+
+  // DELETE /files/:id
+  app.delete<{ Params: { id: string } }>('/files/:id', async (request, reply) => {
+    const db = getDb()
+    const driver = createStorageDriver()
+
+    const rows = await db.select({ storage_key: files.storage_key })
+      .from(files)
+      .where(and(eq(files.id, request.params.id), eq(files.tenant_id, request.tenantId)))
+      .limit(1)
+    const row = rows[0]
+    if (!row) return reply.status(404).send({ error: 'FILE_NOT_FOUND', message: 'File not found' })
+
+    await db.delete(files).where(eq(files.id, request.params.id))
+    await driver.delete(row.storage_key).catch((e) => {
+      request.log.warn({ err: e }, 'driver.delete failed; row already removed (orphan in storage)')
+    })
+    await db.insert(auditLog).values({
+      tenant_id: request.tenantId,
+      entity_type: 'file',
+      entity_id: request.params.id,
+      action: 'delete',
+      actor: request.userSlug!,
+      payload: {},
+      user_ip: request.ip,
+    })
+
+    return reply.status(204).send()
+  })
 }

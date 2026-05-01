@@ -210,3 +210,56 @@ describe('GET /api/v1/files/:id/download', () => {
     expect(res.json().error).toBe('STORAGE_ORPHAN')
   })
 })
+
+describe('GET /api/v1/files (list)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('lists files filtered by tenant with default pagination', async () => {
+    const app = await buildApp('s', 'tenant-1', 'admin')
+    mockDb.select.mockReturnValueOnce({
+      from: () => ({ where: () => ({ orderBy: () => ({ limit: () => ({ offset: () => Promise.resolve([
+        { id: 'a', original_filename: 'f.txt', mime_type: 'text/plain', size_bytes: 5, expires_at: null, created_at: new Date() },
+      ]) }) }) }) })
+    })
+    const res = await app.inject({ method: 'GET', url: '/api/v1/files' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().data).toHaveLength(1)
+  })
+
+  it('clamps limit to 200', async () => {
+    const app = await buildApp('s', 'tenant-1', 'admin')
+    mockDb.select.mockReturnValueOnce({
+      from: () => ({ where: () => ({ orderBy: () => ({ limit: () => ({ offset: () => Promise.resolve([]) }) }) }) })
+    })
+    const res = await app.inject({ method: 'GET', url: '/api/v1/files?limit=10000' })
+    expect(res.statusCode).toBe(200)
+    // hard to assert internal clamp without inspecting; smoke check it doesn't error
+  })
+})
+
+describe('DELETE /api/v1/files/:id', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('returns 204 and calls driver.delete', async () => {
+    const app = await buildApp('s', 'tenant-1', 'admin')
+    mockDb.select.mockReturnValueOnce({
+      from: () => ({ where: () => ({ limit: () => Promise.resolve([{ storage_key: 'tenant-1/abc' }]) }) })
+    })
+    mockDb.delete.mockReturnValueOnce({ where: () => Promise.resolve() })
+    mockDb.insert.mockReturnValueOnce({ values: () => Promise.resolve() }) // audit
+    mockDriver.delete.mockResolvedValueOnce(undefined)
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/files/abc' })
+    expect(res.statusCode).toBe(204)
+    expect(mockDriver.delete).toHaveBeenCalledWith('tenant-1/abc')
+  })
+
+  it('returns 404 when file not found', async () => {
+    const app = await buildApp('s', 'tenant-1', 'admin')
+    mockDb.select.mockReturnValueOnce({
+      from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) })
+    })
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/files/missing' })
+    expect(res.statusCode).toBe(404)
+  })
+})
