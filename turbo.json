@@ -17,7 +17,9 @@
         "OPENAI_API_KEY",
         "PORT",
         "NODE_ENV",
-        "VITE_API_URL"
+        "VITE_API_URL",
+        "FILE_STORAGE_DRIVER",
+        "FILE_STORAGE_ROOT"
       ]
     },
     "test": {
