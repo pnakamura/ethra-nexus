@@ -45,6 +45,9 @@ export { validateCron, calcNextRun } from './lib/scheduler/cron-utils'
 export { dispatchOutput } from './lib/scheduler/output-dispatcher'
 export type { DispatchSource } from './lib/scheduler/output-dispatcher'
 
+// Storage
+export * from './lib/storage'
+
 // Wiki Writer
 export { writeLesson } from './lib/wiki/wiki-writer'
 export type { WikiLessonInput } from './lib/wiki/wiki-writer'
