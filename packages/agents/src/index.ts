@@ -48,6 +48,9 @@ export type { DispatchSource } from './lib/scheduler/output-dispatcher'
 // Storage
 export * from './lib/storage'
 
+// Alerts
+export * from './lib/alerts'
+
 // Wiki Writer
 export { writeLesson } from './lib/wiki/wiki-writer'
 export type { WikiLessonInput } from './lib/wiki/wiki-writer'
