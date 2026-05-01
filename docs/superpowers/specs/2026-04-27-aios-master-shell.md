@@ -3,9 +3,11 @@
 > **Spec #1 de 5** na trilha que termina com o critério de aceite "xlsx → HTML dashboard end-to-end".
 > Specs subsequentes (em ordem): #2 File Storage + Alerts · #3 Input Worker + Parsers · #4 Output Worker + HTML Dashboard · #5 Integração E2E.
 
-**Data**: 2026-04-27
+**Data**: 2026-04-27 (revisado em 2026-04-28 após audit do codebase)
 **Autor**: Paulo Nakamura (com Claude)
-**Status**: Approved for plan writing
+**Status**: Approved for implementation (with audit revisions)
+
+> **Audit 2026-04-28**: depois das Tasks 1-2 entrarem em review, descoberto que JWT da casa contém apenas `{ tenantId, email, role }` (sem `sub`) e `tenant_members` table não é queryable pelo app. Modelo de permission simplificado para **admin-only no MVP**. Per-user opt-in deferido. Detalhes técnicos no `## Audit decision log` do plano.
 
 ---
 
@@ -19,7 +21,7 @@ Criar um **agente conversacional read-only** chamado AIOS Master que serve como 
 - Click em "Quais agentes estão ativos?" cria thread, dispara turno, agente chama `system:list_agents` e responde com lista.
 - Streaming visível: texto aparece progressivamente, tool calls aparecem no painel direito com duração.
 - Thread persiste após reload, ganha auto-título (~2s após 1º turno).
-- Member sem `copilot_enabled` recebe 403.
+- Usuário não-admin (JWT.role !== 'admin') recebe 403 ao acessar `/copilot`.
 - Per-turn caps funcionam (10 tool calls / $0.50 USD).
 - Cobertura de testes ≥80% nos arquivos novos do backend.
 - Smoke test manual de aceite (lista na seção Testing) passa em todos os 11 itens.
@@ -30,7 +32,7 @@ Criar um **agente conversacional read-only** chamado AIOS Master que serve como 
 - Sidepanel global / contextual chat → Spec separado futuro
 - Attachments na chat (xlsx upload, etc.) → Specs #2 + #3
 - Output artifacts inline (HTML dashboard, PDF) → Spec #4
-- UI de toggle do `copilot_enabled` → defer até 2º membro existir
+- UI de toggle do `copilot_enabled` → defer até JWT ter user identity ('sub') real
 - MCP exposure → Fase D (não-prevista)
 - Mobile/responsive → desktop-first como resto do app
 - Stop generation button (cancel mid-stream) → defer
@@ -47,7 +49,7 @@ Criar um **agente conversacional read-only** chamado AIOS Master que serve como 
 | Q3 | UI shape | Página dedicada `/copilot` seguindo padrão 3-panel do `OrchestratorPage` |
 | Q4 | Tool calling integration | Anthropic Tool Use API nativo (Claude SDK direto, sem ProviderRegistry) |
 | Q5 | Modelo padrão | Claude Sonnet 4.6 |
-| Q6 | Permission scope | C — admin sempre + member com `tenant_members.copilot_enabled=TRUE` |
+| Q6 | Permission scope | **B (revisado em 2026-04-28)** — admin-only no MVP. Q5 original (C: hybrid com `tenant_members.copilot_enabled`) descartado após audit revelar que JWT não tem `sub` e `tenant_members` não é queryable pelo app. Per-user opt-in defer pra spec futuro |
 | Q7 | Per-turn safety cap | C+E — 10 tool calls e $0.50 USD, env-configurable |
 | Q8 | Schema de mensagens | C — Anthropic content blocks JSONB + tabela `copilot_tool_calls` separada para audit |
 
@@ -111,19 +113,22 @@ Criar um **agente conversacional read-only** chamado AIOS Master que serve como 
 
 ## Database schema
 
-Migração: `infra/supabase/migrations/012_copilot_tables.sql`.
+Migração: `infra/supabase/migrations/021_copilot_tables.sql`.
 Schema Drizzle: `packages/db/src/schema/copilot.ts` (novo), exportado de `index.ts`.
+
+> **Code review (2026-04-28)**: spec original carecia de RLS policies, CHECK constraints, `updated_at` trigger e ON DELETE behaviors. Corrigido inline abaixo. `agent_id` agora nullable (ON DELETE SET NULL). Removido `cm_tenant_role_idx` (baixa seletividade — apenas 2 valores).
 
 ### Tabela 1 · `copilot_conversations`
 
 ```sql
 CREATE TABLE copilot_conversations (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   user_id         TEXT NOT NULL,
-  agent_id        UUID NOT NULL REFERENCES agents(id),
+  agent_id        UUID REFERENCES agents(id) ON DELETE SET NULL,
   title           TEXT,
-  status          TEXT NOT NULL DEFAULT 'active',
+  status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'archived')),
   message_count   INTEGER NOT NULL DEFAULT 0,
   total_tokens    INTEGER NOT NULL DEFAULT 0,
   total_cost_usd  NUMERIC(10,6) NOT NULL DEFAULT 0,
@@ -131,9 +136,24 @@ CREATE TABLE copilot_conversations (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_conversations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_full_access" ON copilot_conversations
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_conversations" ON copilot_conversations
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND user_id = (auth.jwt()->>'email')
+  );
+
 CREATE INDEX cc_tenant_user_recent_idx ON copilot_conversations(tenant_id, user_id, last_message_at DESC);
 CREATE INDEX cc_tenant_status_idx      ON copilot_conversations(tenant_id, status);
+
+CREATE TRIGGER copilot_conversations_updated_at
+  BEFORE UPDATE ON copilot_conversations
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 ```
 
 - `user_id` (não shared no tenant): cada user tem suas próprias threads.
@@ -146,8 +166,9 @@ CREATE INDEX cc_tenant_status_idx      ON copilot_conversations(tenant_id, statu
 CREATE TABLE copilot_messages (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id UUID NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
-  role            TEXT NOT NULL,
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL
+                    CHECK (role IN ('user', 'assistant')),
   content         JSONB NOT NULL,
   model           TEXT,
   tokens_in       INTEGER NOT NULL DEFAULT 0,
@@ -157,9 +178,22 @@ CREATE TABLE copilot_messages (
   error_code      TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_messages ENABLE ROW LEVEL SECURITY;
-CREATE INDEX cm_conv_time_idx   ON copilot_messages(conversation_id, created_at);
-CREATE INDEX cm_tenant_role_idx ON copilot_messages(tenant_id, role);
+
+CREATE POLICY "service_role_full_access" ON copilot_messages
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_messages" ON copilot_messages
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND conversation_id IN (
+      SELECT id FROM copilot_conversations
+      WHERE user_id = (auth.jwt()->>'email')
+    )
+  );
+
+CREATE INDEX cm_conv_time_idx ON copilot_messages(conversation_id, created_at);
 ```
 
 `content` segue formato Anthropic content blocks. Exemplos:
@@ -191,18 +225,33 @@ CREATE INDEX cm_tenant_role_idx ON copilot_messages(tenant_id, role);
 CREATE TABLE copilot_tool_calls (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id      UUID NOT NULL REFERENCES copilot_messages(id) ON DELETE CASCADE,
-  conversation_id UUID NOT NULL REFERENCES copilot_conversations(id),
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  conversation_id UUID NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   tool_use_id     TEXT NOT NULL,
   tool_name       TEXT NOT NULL,
   tool_input      JSONB NOT NULL DEFAULT '{}',
   tool_result     JSONB,
-  status          TEXT NOT NULL,
+  status          TEXT NOT NULL
+                    CHECK (status IN ('completed', 'error')),
   error_code      TEXT,
   duration_ms     INTEGER NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_tool_calls ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_full_access" ON copilot_tool_calls
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_tool_calls" ON copilot_tool_calls
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND conversation_id IN (
+      SELECT id FROM copilot_conversations
+      WHERE user_id = (auth.jwt()->>'email')
+    )
+  );
+
 CREATE INDEX ctc_tenant_tool_time_idx ON copilot_tool_calls(tenant_id, tool_name, created_at DESC);
 CREATE INDEX ctc_message_idx          ON copilot_tool_calls(message_id);
 CREATE INDEX ctc_status_idx           ON copilot_tool_calls(status);
@@ -210,11 +259,9 @@ CREATE INDEX ctc_status_idx           ON copilot_tool_calls(status);
 
 `message_id` aponta para a assistant message que continha o `tool_use` block. `tool_result` é duplicado aqui propositalmente (audit table = denormalizada).
 
-### Alteração 4 · `tenant_members.copilot_enabled`
+### ~~Alteração 4 · `tenant_members.copilot_enabled`~~ — REMOVIDO
 
-```sql
-ALTER TABLE tenant_members ADD COLUMN copilot_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-```
+**Audit 2026-04-28**: descoberto que JWT da casa não tem `sub` user identifier (só `tenantId, email, role`) e `tenant_members` table não é queryable pelo app code. Per-user opt-in deferido. **Permission MVP é admin-only via JWT.role**, sem nova coluna.
 
 ### Seed 5 · Agent `aios-master` para tenant existente
 

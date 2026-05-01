@@ -12,6 +12,104 @@
 
 ---
 
+## Audit decision log (2026-04-28)
+
+After Tasks 1–2 entered review, a deeper audit of the codebase revealed gaps the original plan missed. Findings + fixes applied to this plan and the spec in a single batch:
+
+| # | Finding | Resolution |
+|---|---------|------------|
+| A1 | Migration `012_*` collided with existing `012_agent_identity_channels.sql`; numbering went to 020 | Renamed to `021_copilot_tables.sql` (next free slot) |
+| A2 | RLS enabled on new tables but NO policies — backend would have failed all writes | Added `service_role_full_access` (FOR ALL) + `members_read_own_*` (FOR SELECT) policies on all 3 tables, matching `004_aios_events.sql` pattern |
+| A3 | Missing `CHECK` constraints on status/role columns | Added: `status IN ('active','archived')`, `role IN ('user','assistant')`, `status IN ('completed','error')` |
+| A4 | Missing `updated_at` trigger on `copilot_conversations` | Added trigger using existing `update_updated_at()` from migration 001 |
+| A5 | FK ON DELETE behavior incomplete | `tenant_id ON DELETE CASCADE` everywhere; `agent_id` nullable + `ON DELETE SET NULL` (matches `aios_events`); `conversation_id` cascade in tool_calls |
+| A6 | Low-selectivity index `cm_tenant_role_idx` (only 2 distinct values) | Removed |
+| A7 | **JWT da casa não tem `sub`** — only `{ tenantId, email, role }` ([app.ts:73](apps/server/src/app.ts#L73)) | RLS uses `auth.jwt()->>'email'`. Plan permission middleware uses `request.user.email`. Schema column `user_id TEXT` stores email |
+| A8 | `tenant_members` table exists in SQL but **zero app code queries it** | Dropped `ALTER TABLE tenant_members ADD copilot_enabled` from migration. Permission MVP is **admin-only via JWT.role**. Per-user opt-in deferred to spec future when JWT has user identity |
+| A9 | `executeWikiQuery` is private in `skill-executor.ts` (not exported) | Task 14 re-implements query inline using `embed` + raw SQL pgvector. No coupling to skill-executor internals |
+| A10 | Drizzle style inconsistent with existing files (`(t) =>` vs `(table) =>`, alignment) | Updated copilot.ts to single-space alignment + `(table) =>` callback parameter, with file header comment |
+
+**Spec Q5 revision**: original choice "C — admin + tenant_members.copilot_enabled" replaced with **B — admin-only**. Per-user opt-in is now a deferred concern in the "Open questions / future work" section.
+
+Tasks 22 and 23 carry inline AUDIT NOTE blocks reminding the implementer that test mocks must drop the tenant_members lookup branches.
+
+---
+
+## Karpathy Principles Audit (post Tasks 1-16)
+
+A retrospective audit against `~/.claude/skills/ethra-nexus/karpathy-guidelines.md` and `CLAUDE.md §3.4` was performed on 2026-04-28 (mid-implementation). Full report: [`docs/superpowers/audits/2026-04-28-karpathy-audit-spec1.md`](../audits/2026-04-28-karpathy-audit-spec1.md).
+
+**Highlights** affecting remaining Tasks 17-32:
+
+| # | Finding | Action item |
+|---|---------|-------------|
+| K1 | **Budget tracking gap** — turn loop bypassa `agentsDb.canExecute / logProviderUsage / upsertBudget` (Q4 decisão de bypassar `ProviderRegistry`) | Inserir **Task 17.5** abaixo: pre-check + post-log + upsertBudget no turn loop |
+| K2 | Subagent-driven processo é overkill para projeto single-dev | Specs #2-5 usar inline execution. Não refaz Spec #1 |
+| K3 | Pre-plan audit não foi feito, capturou-se gaps durante implementação | Specs #2-5 fazer 15-20min de grep no codebase ANTES de escrever plano |
+| K4 | Migrations 021+022 nunca rodadas em DB nenhum | Antes de Task 17, aplicar migrations num DB de dev e rodar tests |
+
+## Task 17.5: Budget tracking integration (audit fix)
+
+> **AUDIT NOTE (K1)**: Insert before Task 17 starts. The turn loop calls Anthropic SDK directly, bypassing `ProviderRegistry`. That's correct (sensitive_data is always true), but means the central budget tracking pattern (canExecute/logProviderUsage/upsertBudget) won't be invoked unless we explicitly add it. Without this, AIOS Master spend is invisible to `provider_usage_log` and `budgets` tables.
+
+**Files:**
+- Modify: `packages/agents/src/lib/copilot/turn-loop.ts` (when created in Task 17, include this integration)
+- Modify: `packages/agents/src/__tests__/copilot-turn-loop.test.ts` (add test verifying canExecute called + logProviderUsage called)
+
+**Implementation requirements**:
+
+1. **Pre-check at start of `executeCopilotTurn`** (before opening SSE stream, before any Anthropic call):
+   ```typescript
+   import { createAgentsDb } from '../db/db-agents'
+   const agentsDb = createAgentsDb()
+   const month = new Date().toISOString().slice(0, 7)
+   const ESTIMATED_COST_PER_TURN = 0.05  // conservative pre-estimate
+   const check = await agentsDb.canExecute(p.aios_master_agent_id, month, ESTIMATED_COST_PER_TURN)
+   if (!check.allowed) {
+     p.sse.write({ type: 'error', code: 'BUDGET_EXCEEDED', message: check.reason ?? 'Budget exceeded' })
+     reply.raw.end()
+     return
+   }
+   ```
+
+2. **Post-message log** after each assistant message in the agentic loop (not just at turn_complete):
+   ```typescript
+   await agentsDb.logProviderUsage({
+     tenant_id: p.tenant_id,
+     agent_id: p.aios_master_agent_id,
+     skill_id: 'copilot:turn',  // synthetic skill_id for the copilot
+     provider: 'anthropic',
+     model: MODEL,
+     tokens_in: step.tokens_in,
+     tokens_out: step.tokens_out,
+     cost_usd: stepCost,
+     latency_ms: 0,  // or track per-step duration if useful
+     is_fallback: false,
+     is_sensitive: true,
+   })
+   await agentsDb.upsertBudget(p.aios_master_agent_id, p.tenant_id, month, stepCost, step.tokens_in + step.tokens_out)
+   ```
+
+3. **Test additions** in `copilot-turn-loop.test.ts`:
+   - `it('blocks turn when canExecute returns not allowed')` — mock returns `{ allowed: false, reason: 'monthly limit exceeded' }`. Assert SSE `error` event with `BUDGET_EXCEEDED`. Assert no Anthropic call made.
+   - `it('logs provider usage and updates budget after each assistant message')` — mock canExecute allowed, run turn with 1 assistant message. Assert `logProviderUsage` called with correct args. Assert `upsertBudget` called.
+
+4. **Type addition** to `ExecuteCopilotTurnParams`:
+   ```typescript
+   aios_master_agent_id: string  // resolved from tenant's aios-master agent in the route handler
+   ```
+
+5. **Where it fits in plan**: Task 17 creates the turn loop skeleton. Task 17.5 layers in budget integration. Task 18 layers tools. Task 19 layers caps. Task 20 layers auto-title. Sequential and stackable.
+
+6. **Commit**:
+   ```bash
+   git add packages/agents/src/lib/copilot/turn-loop.ts \
+           packages/agents/src/__tests__/copilot-turn-loop.test.ts
+   git commit -m "feat(copilot): turn loop budget integration (canExecute pre-check + logProviderUsage + upsertBudget)"
+   ```
+
+---
+
 ## File Structure
 
 ### Backend — `packages/db`
@@ -20,7 +118,7 @@
 |------|---------|--------|
 | `packages/db/src/schema/copilot.ts` | Drizzle schema for 3 copilot tables | NEW |
 | `packages/db/src/schema/index.ts` | Re-export copilot schema | MODIFY |
-| `infra/supabase/migrations/012_copilot_tables.sql` | SQL migration (tables + ALTER + seed) | NEW |
+| `infra/supabase/migrations/021_copilot_tables.sql` | SQL migration (tables + ALTER + seed) | NEW |
 
 ### Backend — `packages/agents/src/lib/copilot/`
 
@@ -38,7 +136,7 @@
 | `tools/cost-breakdown.ts` | Tool 5 | NEW |
 | `tools/agent-health.ts` | Tool 6 | NEW |
 | `tools/list-pending-approvals.ts` | Tool 7 | NEW |
-| `tools/wiki-query.ts` | Tool 8 (wraps `executeWikiQuery`) | NEW |
+| `tools/wiki-query.ts` | Tool 8 (inline pgvector query — does NOT import private `executeWikiQuery`) | NEW |
 | `tools/list-storage-alerts.ts` | Tool 9 (stub returning `[]`) | NEW |
 | `turn-loop.ts` | `executeCopilotTurn` orchestration | NEW |
 | `__tests__/*.test.ts` | Vitest tests | NEW |
@@ -76,7 +174,7 @@
 
 | # | Phase | Task |
 |---|-------|------|
-| 1 | DB | Migration SQL + ALTER tenant_members |
+| 1 | DB | Migration SQL — copilot tables (admin-only permission, no tenant_members alter) |
 | 2 | DB | Drizzle schema for copilot tables |
 | 3 | DB | Apply migration locally + seed aios-master |
 | 4 | Foundation | Anthropic client wrapper |
@@ -93,6 +191,7 @@
 | 15 | Tool | `system:list_storage_alerts` (stub) |
 | 16 | Tool | All-tools array + getToolsForAnthropic + permission gate |
 | 17 | Loop | Turn loop core (text-only, no tools) |
+| 17.5 | Loop | **Budget integration** (audit fix K1 — see audit doc) |
 | 18 | Loop | Tool execution within turn |
 | 19 | Loop | Per-turn cost + tool count caps |
 | 20 | Loop | Auto-title fire-and-forget |
@@ -115,26 +214,41 @@ Each task ends with a commit. Naming: `feat(copilot): <component>` for features,
 
 ---
 
-## Task 1: Migration SQL — copilot tables + tenant_members alter
+## Task 1: Migration SQL — copilot tables (admin-only)
 
 **Files:**
-- Create: `infra/supabase/migrations/012_copilot_tables.sql`
+- Create: `infra/supabase/migrations/021_copilot_tables.sql`
 
 - [ ] **Step 1: Create the migration file**
 
-Write `infra/supabase/migrations/012_copilot_tables.sql`:
+Write `infra/supabase/migrations/021_copilot_tables.sql`:
 
 ```sql
--- Migration 012: Copilot tables for AIOS Master Agent (Spec #1)
--- Safe: only adds new tables and one nullable-defaulted column
+-- ============================================================
+-- 021_copilot_tables.sql
+-- AIOS Master Agent (shell) — Spec #1
+-- Tabelas de conversas, mensagens (Anthropic content blocks),
+-- e audit de tool calls do copilot conversacional read-only.
+--
+-- SEGURANÇA:
+-- - RLS habilitado + policies (service_role + tenant scoping)
+-- - tenant_id NOT NULL e indexado em todas
+-- - cascade delete: conv → messages → tool_calls
+-- - CHECK constraints em status
+-- - updated_at trigger em conversations (segue padrão da casa)
+-- - ADD COLUMN IF NOT EXISTS para idempotência local
+-- ============================================================
+
+-- ── 1. Conversations ────────────────────────────────────────
 
 CREATE TABLE copilot_conversations (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   user_id         TEXT NOT NULL,
-  agent_id        UUID NOT NULL REFERENCES agents(id),
+  agent_id        UUID REFERENCES agents(id) ON DELETE SET NULL,
   title           TEXT,
-  status          TEXT NOT NULL DEFAULT 'active',
+  status          TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'archived')),
   message_count   INTEGER NOT NULL DEFAULT 0,
   total_tokens    INTEGER NOT NULL DEFAULT 0,
   total_cost_usd  NUMERIC(10,6) NOT NULL DEFAULT 0,
@@ -142,15 +256,33 @@ CREATE TABLE copilot_conversations (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_conversations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_full_access" ON copilot_conversations
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_conversations" ON copilot_conversations
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND user_id = (auth.jwt()->>'email')
+  );
+
 CREATE INDEX cc_tenant_user_recent_idx ON copilot_conversations(tenant_id, user_id, last_message_at DESC);
 CREATE INDEX cc_tenant_status_idx      ON copilot_conversations(tenant_id, status);
+
+CREATE TRIGGER copilot_conversations_updated_at
+  BEFORE UPDATE ON copilot_conversations
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ── 2. Messages (Anthropic content blocks: text/tool_use/tool_result) ─
 
 CREATE TABLE copilot_messages (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id UUID NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
-  role            TEXT NOT NULL,
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL
+                    CHECK (role IN ('user', 'assistant')),
   content         JSONB NOT NULL,
   model           TEXT,
   tokens_in       INTEGER NOT NULL DEFAULT 0,
@@ -160,37 +292,71 @@ CREATE TABLE copilot_messages (
   error_code      TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_messages ENABLE ROW LEVEL SECURITY;
-CREATE INDEX cm_conv_time_idx   ON copilot_messages(conversation_id, created_at);
-CREATE INDEX cm_tenant_role_idx ON copilot_messages(tenant_id, role);
+
+CREATE POLICY "service_role_full_access" ON copilot_messages
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_messages" ON copilot_messages
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND conversation_id IN (
+      SELECT id FROM copilot_conversations
+      WHERE user_id = (auth.jwt()->>'email')
+    )
+  );
+
+CREATE INDEX cm_conv_time_idx ON copilot_messages(conversation_id, created_at);
+
+-- ── 3. Tool calls (audit/observability) ─────────────────────
 
 CREATE TABLE copilot_tool_calls (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id      UUID NOT NULL REFERENCES copilot_messages(id) ON DELETE CASCADE,
-  conversation_id UUID NOT NULL REFERENCES copilot_conversations(id),
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  conversation_id UUID NOT NULL REFERENCES copilot_conversations(id) ON DELETE CASCADE,
+  tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   tool_use_id     TEXT NOT NULL,
   tool_name       TEXT NOT NULL,
   tool_input      JSONB NOT NULL DEFAULT '{}',
   tool_result     JSONB,
-  status          TEXT NOT NULL,
+  status          TEXT NOT NULL
+                    CHECK (status IN ('completed', 'error')),
   error_code      TEXT,
   duration_ms     INTEGER NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
 ALTER TABLE copilot_tool_calls ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_full_access" ON copilot_tool_calls
+  FOR ALL USING (auth.role() = 'service_role');
+
+CREATE POLICY "members_read_own_tool_calls" ON copilot_tool_calls
+  FOR SELECT USING (
+    tenant_id = ANY(user_tenant_ids())
+    AND conversation_id IN (
+      SELECT id FROM copilot_conversations
+      WHERE user_id = (auth.jwt()->>'email')
+    )
+  );
+
 CREATE INDEX ctc_tenant_tool_time_idx ON copilot_tool_calls(tenant_id, tool_name, created_at DESC);
 CREATE INDEX ctc_message_idx          ON copilot_tool_calls(message_id);
 CREATE INDEX ctc_status_idx           ON copilot_tool_calls(status);
 
-ALTER TABLE tenant_members ADD COLUMN IF NOT EXISTS copilot_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+-- NOTE: tenant_members.copilot_enabled NÃO é adicionado.
+-- O modelo de permission MVP é admin-only via JWT.role no app layer.
+-- Per-user opt-in fica para spec futuro quando JWT tiver 'sub' real.
 ```
+
+> **Code review notes** (applied 2026-04-28): RLS policies (`service_role_full_access` + member-scoped read via `auth.jwt()->>'email'`), CHECK on `status`/`role`, ON DELETE CASCADE on tenant_id and conversation_id FKs, ON DELETE SET NULL on agent_id (with agent_id nullable), `updated_at` trigger using existing `update_updated_at()` function. Removed `cm_tenant_role_idx` (low selectivity — role has 2 values). **Audit 2026-04-28**: removida ALTER TABLE para `tenant_members.copilot_enabled` — JWT da casa não tem `sub` user identity, permission é admin-only no MVP.
 
 - [ ] **Step 2: Commit**
 
 ```bash
-git add infra/supabase/migrations/012_copilot_tables.sql
-git commit -m "feat(db): migration 012 — copilot tables + tenant_members.copilot_enabled"
+git add infra/supabase/migrations/021_copilot_tables.sql
+git commit -m "feat(db): migration 021 — copilot tables (admin-only permission)"
 ```
 
 ---
@@ -213,9 +379,9 @@ import { tenants, agents } from './core'
 
 export const copilotConversations = pgTable('copilot_conversations', {
   id:              uuid('id').primaryKey().defaultRandom(),
-  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id),
+  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   user_id:         text('user_id').notNull(),
-  agent_id:        uuid('agent_id').notNull().references(() => agents.id),
+  agent_id:        uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
   title:           text('title'),
   status:          text('status').notNull().default('active'),
   message_count:   integer('message_count').notNull().default(0),
@@ -232,7 +398,7 @@ export const copilotConversations = pgTable('copilot_conversations', {
 export const copilotMessages = pgTable('copilot_messages', {
   id:              uuid('id').primaryKey().defaultRandom(),
   conversation_id: uuid('conversation_id').notNull().references(() => copilotConversations.id, { onDelete: 'cascade' }),
-  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id),
+  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   role:            text('role').notNull(),
   content:         jsonb('content').notNull(),
   model:           text('model'),
@@ -243,15 +409,14 @@ export const copilotMessages = pgTable('copilot_messages', {
   error_code:      text('error_code'),
   created_at:      timestamp('created_at').notNull().defaultNow(),
 }, (t) => ({
-  convTime:   index('cm_conv_time_idx').on(t.conversation_id, t.created_at),
-  tenantRole: index('cm_tenant_role_idx').on(t.tenant_id, t.role),
+  convTime: index('cm_conv_time_idx').on(t.conversation_id, t.created_at),
 }))
 
 export const copilotToolCalls = pgTable('copilot_tool_calls', {
   id:              uuid('id').primaryKey().defaultRandom(),
   message_id:      uuid('message_id').notNull().references(() => copilotMessages.id, { onDelete: 'cascade' }),
-  conversation_id: uuid('conversation_id').notNull().references(() => copilotConversations.id),
-  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id),
+  conversation_id: uuid('conversation_id').notNull().references(() => copilotConversations.id, { onDelete: 'cascade' }),
+  tenant_id:       uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   tool_use_id:     text('tool_use_id').notNull(),
   tool_name:       text('tool_name').notNull(),
   tool_input:      jsonb('tool_input').notNull().default({}),
@@ -292,14 +457,14 @@ git commit -m "feat(db): drizzle schema for copilot tables"
 ## Task 3: Seed migration — aios-master agent per tenant
 
 **Files:**
-- Create: `infra/supabase/migrations/013_seed_aios_master.sql`
+- Create: `infra/supabase/migrations/022_seed_aios_master.sql`
 
 - [ ] **Step 1: Create the seed migration**
 
-Write `infra/supabase/migrations/013_seed_aios_master.sql`:
+Write `infra/supabase/migrations/022_seed_aios_master.sql`:
 
 ```sql
--- Migration 013: Seed AIOS Master agent for each tenant (idempotent)
+-- Migration 022: Seed AIOS Master agent for each tenant (idempotent)
 
 INSERT INTO agents (
   id, tenant_id, slug, name, role, status, system_prompt,
@@ -344,7 +509,7 @@ Expected after running both: `SELECT slug FROM agents WHERE slug = 'aios-master'
 - [ ] **Step 3: Commit**
 
 ```bash
-git add infra/supabase/migrations/013_seed_aios_master.sql
+git add infra/supabase/migrations/022_seed_aios_master.sql
 git commit -m "feat(db): seed aios-master agent per tenant"
 ```
 
@@ -1857,13 +2022,15 @@ git commit -m "feat(copilot): tool system:list_pending_approvals"
 
 ---
 
-## Task 14: Tool — `system:wiki_query` (wraps existing skill)
+## Task 14: Tool — `system:wiki_query`
 
 **Files:**
 - Create: `packages/agents/src/lib/copilot/tools/wiki-query.ts`
 - Create: `packages/agents/src/__tests__/copilot-tool-wiki-query.test.ts`
 
-This tool delegates to the existing `executeWikiQuery` function in `packages/agents/src/lib/skills/skill-executor.ts`. It does NOT re-implement search.
+> **AUDIT NOTE (2026-04-28)**: original plan said "wraps existing executeWikiQuery". That function is **private** in `skill-executor.ts` (not exported). Re-implement the query inline in this tool — uses the same primitives (`embed`, `getDb`, raw SQL pgvector) but kept independent. This avoids coupling to an internal skill-executor symbol.
+
+The implementation below already does the query inline (uses `embed` + raw SQL via `db.execute(sql\`...\`)`) — no import of `executeWikiQuery` is needed. Do NOT try to import `executeWikiQuery` from skill-executor.
 
 - [ ] **Step 1: Write failing test**
 
@@ -3302,40 +3469,25 @@ Write `apps/server/src/routes/copilot.ts`:
 
 ```typescript
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { eq, and } from 'drizzle-orm'
-import { getDb, tenantMembers } from '@ethra-nexus/db'
 
 declare module 'fastify' {
   interface FastifyRequest {
-    userId?: string
+    userEmail?: string
     userRole?: 'admin' | 'member'
   }
 }
 
+// Audit-revised (2026-04-28): JWT da casa contém { tenantId, email, role }.
+// MVP é admin-only — sem lookup em tenant_members (table existe em SQL mas
+// não é queryable pelo app code; per-user opt-in defere até JWT ter user identity).
 async function requireCopilotAccess(request: FastifyRequest, reply: FastifyReply) {
-  const userId = (request.user as { sub?: string } | undefined)?.sub
-  if (!userId) return reply.status(401).send({ error: 'Unauthorized' })
-
-  const db = getDb()
-  const rows = await db.select({
-    role: tenantMembers.role,
-    copilot_enabled: tenantMembers.copilot_enabled,
-  })
-    .from(tenantMembers)
-    .where(and(
-      eq(tenantMembers.user_id, userId),
-      eq(tenantMembers.tenant_id, request.tenantId),
-    ))
-    .limit(1)
-
-  const member = rows[0]
-  if (!member) return reply.status(403).send({ error: 'Not a member' })
-  if (member.role !== 'admin' && !member.copilot_enabled) {
-    return reply.status(403).send({ error: 'Copilot access not enabled' })
+  const user = request.user as { tenantId?: string; email?: string; role?: string } | undefined
+  if (!user?.email) return reply.status(401).send({ error: 'Unauthorized' })
+  if (user.role !== 'admin') {
+    return reply.status(403).send({ error: 'Copilot is admin-only' })
   }
-
-  request.userId = userId
-  request.userRole = member.role as 'admin' | 'member'
+  request.userEmail = user.email
+  request.userRole = user.role as 'admin' | 'member'
 }
 
 export async function copilotRoutes(app: FastifyInstance) {
@@ -3343,7 +3495,7 @@ export async function copilotRoutes(app: FastifyInstance) {
 
   // Health check (sanity route)
   app.get('/copilot/health', async (request) => {
-    return { ok: true, user_id: request.userId, role: request.userRole }
+    return { ok: true, user_email: request.userEmail, role: request.userRole }
   })
 
   // Real endpoints come in Tasks 22 and 23.
@@ -3372,7 +3524,7 @@ Start server (`npm run dev` from project root). Hit:
 curl -i http://localhost:3001/api/v1/copilot/health -H "Authorization: Bearer <admin-jwt>"
 ```
 
-Expected: 200 with `{"ok":true,"user_id":"...","role":"admin"}`.
+Expected: 200 with `{"ok":true,"user_email":"...","role":"admin"}`.
 
 ```bash
 curl -i http://localhost:3001/api/v1/copilot/health
@@ -3380,16 +3532,25 @@ curl -i http://localhost:3001/api/v1/copilot/health
 
 Expected: 401 Unauthorized.
 
+```bash
+# (with a non-admin token)
+curl -i http://localhost:3001/api/v1/copilot/health -H "Authorization: Bearer <member-jwt>"
+```
+
+Expected: 403 with `{"error":"Copilot is admin-only"}`.
+
 - [ ] **Step 4: Commit**
 
 ```bash
 git add apps/server/src/routes/copilot.ts apps/server/src/app.ts
-git commit -m "feat(api): copilot route registration + permission middleware"
+git commit -m "feat(api): copilot route registration + admin-only middleware"
 ```
 
 ---
 
 ## Task 22: Conversation CRUD endpoints
+
+> **AUDIT NOTE (2026-04-28)**: middleware was simplified to admin-only (Task 21 has the canonical version). The test scaffolding in Step 1 below was written assuming a DB lookup for `tenant_members.copilot_enabled`. Adapt: the test cases that simulate "first call returns member, second returns data" should be simplified — there is no member lookup anymore, just the data query. Drop the `if (calls === 1) return ... copilot_enabled` branches and renumber subsequent calls.
 
 **Files:**
 - Modify: `apps/server/src/routes/copilot.ts` (add 5 endpoints)
@@ -3417,7 +3578,6 @@ import { vi } from 'vitest'
 
 vi.mock('@ethra-nexus/db', () => ({
   getDb: () => mockDb,
-  tenantMembers: { user_id: 'u', tenant_id: 't', role: 'r', copilot_enabled: 'ce' },
   copilotConversations: { id: 'id', tenant_id: 'tid', user_id: 'uid', agent_id: 'aid', title: 'title', status: 'status', last_message_at: 'lma', updated_at: 'ua' },
   copilotMessages: { conversation_id: 'cid', tenant_id: 'tid' },
   agents: { id: 'id', tenant_id: 'tid', slug: 'slug' },
@@ -3432,19 +3592,13 @@ vi.mock('drizzle-orm', () => ({
 
 const { copilotRoutes } = await import('../routes/copilot')
 
-async function buildApp(userId: string, tenantId: string, role: 'admin' | 'member' = 'admin'): Promise<FastifyInstance> {
+async function buildApp(userEmail: string, tenantId: string, role: 'admin' | 'member' = 'admin'): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   app.addHook('onRequest', async (request) => {
     request.tenantId = tenantId
-    ;(request as { user?: { sub: string } }).user = { sub: userId }
-  })
-  // Stub member lookup to allow access
-  mockDb.select.mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({
-        limit: vi.fn().mockResolvedValue([{ role, copilot_enabled: false }]),
-      }),
-    }),
+    ;(request as { user?: { tenantId: string; email: string; role: string } }).user = {
+      tenantId, email: userEmail, role,
+    }
   })
   await app.register(copilotRoutes, { prefix: '/api/v1' })
   return app
@@ -3538,7 +3692,7 @@ export async function copilotRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireCopilotAccess)
 
   app.get('/copilot/health', async (request) => {
-    return { ok: true, user_id: request.userId, role: request.userRole }
+    return { ok: true, user_id: request.userEmail, role: request.userRole }
   })
 
   // POST /copilot/conversations — create a new thread
@@ -3552,7 +3706,7 @@ export async function copilotRoutes(app: FastifyInstance) {
 
     const inserted = await db.insert(copilotConversations).values({
       tenant_id: request.tenantId,
-      user_id: request.userId!,
+      user_id: request.userEmail!,
       agent_id: aios[0].id,
       title: null,
       status: 'active',
@@ -3568,7 +3722,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       const limit = Math.min(parseInt(request.query.limit ?? '50', 10), 100)
       const conditions = [
         eq(copilotConversations.tenant_id, request.tenantId),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
       ]
       if (request.query.status) conditions.push(eq(copilotConversations.status, request.query.status))
 
@@ -3588,7 +3742,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       .from(copilotConversations)
       .where(and(
         eq(copilotConversations.id, request.params.id),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .limit(1)
@@ -3615,7 +3769,7 @@ export async function copilotRoutes(app: FastifyInstance) {
         .set(updates)
         .where(and(
           eq(copilotConversations.id, request.params.id),
-          eq(copilotConversations.user_id, request.userId!),
+          eq(copilotConversations.user_id, request.userEmail!),
           eq(copilotConversations.tenant_id, request.tenantId),
         ))
         .returning()
@@ -3631,7 +3785,7 @@ export async function copilotRoutes(app: FastifyInstance) {
       .set({ status: 'archived', updated_at: new Date() })
       .where(and(
         eq(copilotConversations.id, request.params.id),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .returning()
@@ -3649,7 +3803,7 @@ Update imports at top of `apps/server/src/routes/copilot.ts`:
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { eq, and, asc, desc } from 'drizzle-orm'
 import {
-  getDb, tenantMembers, copilotConversations, copilotMessages, agents,
+  getDb, copilotConversations, copilotMessages, agents,
 } from '@ethra-nexus/db'
 ```
 
@@ -3668,6 +3822,8 @@ git commit -m "feat(api): copilot conversation CRUD endpoints"
 ---
 
 ## Task 23: SSE message endpoint
+
+> **AUDIT NOTE (2026-04-28)**: same as Task 22 — test mocks need adaptation to admin-only middleware (no more `copilot_enabled` lookup). Use `request.user.email` for user_id throughout endpoint code.
 
 **Files:**
 - Modify: `apps/server/src/routes/copilot.ts` (add POST /messages with SSE)
@@ -3780,7 +3936,7 @@ Then replace the comment `// POST /copilot/conversations/:id/messages — added 
       .from(copilotConversations)
       .where(and(
         eq(copilotConversations.id, id),
-        eq(copilotConversations.user_id, request.userId!),
+        eq(copilotConversations.user_id, request.userEmail!),
         eq(copilotConversations.tenant_id, request.tenantId),
       ))
       .limit(1)
@@ -3818,7 +3974,7 @@ Then replace the comment `// POST /copilot/conversations/:id/messages — added 
       await executeCopilotTurn({
         conversation_id: id,
         tenant_id: request.tenantId,
-        user_id: request.userId!,
+        user_id: request.userEmail!,
         user_role: request.userRole!,
         content,
         system_prompt: systemPrompt,
@@ -5291,7 +5447,7 @@ Open dev server, login as admin, navigate to `/copilot`. Walk through:
 - [ ] Type follow-up "quanto gastei?" + Enter → sees `system:get_budget_status` invoked
 - [ ] Vague prompt (e.g., "me explique tudo sobre o universo") → cap may trigger; UI shows error inline if so
 - [ ] Temporarily set `ANTHROPIC_API_KEY=invalid` and restart server → send message → see error inline + toast
-- [ ] Restore key. Login as a non-admin member without `copilot_enabled` → `/copilot` request shows 403
+- [ ] Restore key. Login with a non-admin token (role !== 'admin') → `/copilot` request shows 403 with `Copilot is admin-only`
 - [ ] Open same thread in 2 browser tabs, send rapidly → 2nd tab's send returns 409 `TURN_IN_PROGRESS`
 
 - [ ] **Step 4: Address any issues found in the checklist**
