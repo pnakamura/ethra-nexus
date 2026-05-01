@@ -33,6 +33,31 @@ export interface CopilotConversationDetail {
   messages: CopilotMessage[]
 }
 
+// HEALTH / BANNER ALERTS ─────────────────────────────────────
+
+export interface CopilotHealthResponse {
+  ok: boolean
+  user_slug: string
+  role: string
+  banner_alerts: Array<{
+    id: string
+    category: string
+    code: string
+    severity: string
+    message: string
+    fired_at: string
+  }>
+}
+
+export function useCopilotHealth() {
+  return useQuery({
+    queryKey: ['copilot', 'health'],
+    queryFn: () => api.get<CopilotHealthResponse>('/copilot/health').then(r => r.data),
+    staleTime: 30_000,        // 30s — refetch on focus or after this
+    refetchInterval: 60_000,  // poll every 60s for banner updates
+  })
+}
+
 // LISTING ────────────────────────────────────────────────────
 
 export function useCopilotConversations(filter?: { status?: 'active' | 'archived' }) {
