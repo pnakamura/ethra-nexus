@@ -1,17 +1,42 @@
--- Migration 023: file storage + system alerts (Spec #2)
--- Safe: novas tabelas + uma coluna nullable em tenants (sem rewrite, sem default backfill)
+-- ============================================================
+-- 023_files_and_alerts.sql
+-- File Storage + System Alerts (Spec #2)
+-- Novas tabelas: `files` (blob metadata + dedup via sha256) e
+-- `system_alerts` (alertas dispatchados pelo orquestrador AIOS).
+-- Coluna nova: tenants.storage_limit_bytes (nullable BIGINT).
+-- Safe: novas tabelas + coluna nullable (sem rewrite, sem default backfill).
+--
+-- SEGURANÇA:
+-- - RLS habilitado em `files` e `system_alerts` (sem policies).
+-- - App conecta como superuser `postgres`; isolamento de tenant
+--   é garantido pela camada de aplicação via `request.tenantId`
+--   extraído do JWT — ver CLAUDE.md §4.1.
+-- - As funções auth.jwt() / auth.role() / user_tenant_ids()
+--   referenciadas na migration 021 são específicas do Supabase e
+--   NÃO existem no Postgres 17 self-hosted usado em produção
+--   (auditoria Spec #1, 2026-04-28). Adicionar policies que as
+--   referenciem faria o apply falhar — portanto nenhuma policy
+--   é criada aqui. Não reabrir esta decisão sem checar o ambiente.
+--
+-- INVARIANTE IMPORTANTE:
+-- - O índice parcial único `system_alerts_one_active_idx`
+--   (tenant_id, category, code) WHERE resolved_at IS NULL
+--   garante exatamente um alerta ativo por (tenant, categoria, código).
+--   Isso é um pré-requisito para `computeStorageAlerts` (Task 12),
+--   que faz upsert baseado nessa unicidade.
+-- ============================================================
 
 -- ── 1. Coluna nova em tenants ─────────────────────────────────
 ALTER TABLE tenants
   ADD COLUMN IF NOT EXISTS storage_limit_bytes BIGINT
-  CHECK (storage_limit_bytes IS NULL OR storage_limit_bytes > 0);
+  CONSTRAINT tenants_storage_limit_positive CHECK (storage_limit_bytes IS NULL OR storage_limit_bytes > 0);
 COMMENT ON COLUMN tenants.storage_limit_bytes IS
   'Hard limit em bytes. NULL = ilimitado (default self-hosted).';
 
 -- ── 2. Tabela `files` ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS files (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id       UUID NOT NULL REFERENCES tenants(id),
+  tenant_id       UUID NOT NULL REFERENCES tenants(id),  -- ON DELETE RESTRICT (default): app layer must purge files before tenant delete
   storage_key     TEXT NOT NULL,
   mime_type       TEXT NOT NULL,
   size_bytes      BIGINT NOT NULL CHECK (size_bytes >= 0),
@@ -37,7 +62,7 @@ ALTER TABLE files ENABLE ROW LEVEL SECURITY;
 -- ── 3. Tabela `system_alerts` ─────────────────────────────────
 CREATE TABLE IF NOT EXISTS system_alerts (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id     UUID NOT NULL REFERENCES tenants(id),
+  tenant_id     UUID NOT NULL REFERENCES tenants(id),  -- ON DELETE RESTRICT (default): resolve or delete alerts before tenant delete
   category      TEXT NOT NULL,
   code          TEXT NOT NULL,
   severity      TEXT NOT NULL CHECK (severity IN ('info','warning','critical')),
