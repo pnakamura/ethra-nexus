@@ -26,7 +26,13 @@ vi.mock('drizzle-orm', () => ({
 const { cleanupExpiredFiles } = await import('../cleanup')
 
 describe('cleanupExpiredFiles', () => {
-  beforeEach(() => { vi.clearAllMocks() })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Re-setup the chain mock for db.delete(files).where(...) after clear.
+    mockDb.delete.mockImplementation(() => ({
+      where: () => Promise.resolve(),
+    }))
+  })
 
   it('returns 0 when no expired files', async () => {
     const driver = new MockStorageDriver()

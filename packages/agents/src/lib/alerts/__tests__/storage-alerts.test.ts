@@ -31,7 +31,15 @@ vi.mock('drizzle-orm', () => ({
 const { computeStorageAlerts } = await import('../storage-alerts')
 
 describe('computeStorageAlerts', () => {
-  beforeEach(() => { vi.clearAllMocks() })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // vi.clearAllMocks() resets implementations too; re-setup the chain mock
+    // for db.update(systemAlerts).set(...).where(...). Without this, the await
+    // throws and stats.resolved doesn't increment.
+    mockDb.update.mockImplementation(() => ({
+      set: () => ({ where: () => Promise.resolve() }),
+    }))
+  })
 
   it('does nothing for tenants without storage_limit_bytes', async () => {
     mockDb.execute.mockResolvedValueOnce({ rows: [] })  // no tenants with limit
