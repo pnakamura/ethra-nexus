@@ -1,5 +1,5 @@
-import { sql } from 'drizzle-orm'
-import { getDb } from '@ethra-nexus/db'
+import { sql, inArray } from 'drizzle-orm'
+import { getDb, systemAlerts } from '@ethra-nexus/db'
 
 export interface StorageAlertStats {
   tenants_processed: number
@@ -69,13 +69,17 @@ export async function computeStorageAlerts(): Promise<StorageAlertStats> {
       stats.created++
     }
 
-    // Resolve any active code that is not the target
+    // Resolve any active code that is not the target.
+    // Use Drizzle inArray operator (proper parameter expansion) instead of
+    // sql`ANY(${arr}::uuid[])` — that path tries to coerce a JS array into a
+    // Postgres array literal "{a,b,c}" via the pg driver, which fails with
+    // "malformed array literal" or "cannot cast type record to uuid[]".
     const obsoleteIds = activeRows.filter(r => r.code !== target).map(r => r.id)
     if (obsoleteIds.length > 0) {
-      await db.execute(sql`
-        UPDATE system_alerts SET resolved_at = NOW()
-        WHERE id = ANY(${obsoleteIds}::uuid[])
-      `)
+      await db
+        .update(systemAlerts)
+        .set({ resolved_at: new Date() })
+        .where(inArray(systemAlerts.id, obsoleteIds))
       stats.resolved += obsoleteIds.length
     }
   }

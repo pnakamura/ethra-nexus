@@ -1,5 +1,5 @@
-import { sql } from 'drizzle-orm'
-import { getDb } from '@ethra-nexus/db'
+import { sql, inArray } from 'drizzle-orm'
+import { getDb, files } from '@ethra-nexus/db'
 import type { FileStorageDriver } from './driver'
 
 /**
@@ -21,7 +21,9 @@ export async function cleanupExpiredFiles(driver: FileStorageDriver): Promise<nu
     await driver.delete(row.storage_key).catch(() => undefined)  // best-effort
   }
 
+  // Use Drizzle inArray operator instead of raw sql`ANY(${arr}::uuid[])`
+  // — pg driver can't coerce JS arrays to Postgres array literal that way.
   const ids = rows.map(r => r.id)
-  await db.execute(sql`DELETE FROM files WHERE id = ANY(${ids}::uuid[])`)
+  await db.delete(files).where(inArray(files.id, ids))
   return rows.length
 }
