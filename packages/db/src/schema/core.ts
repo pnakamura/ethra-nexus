@@ -63,6 +63,7 @@ export const agents = pgTable('agents', {
   response_language: text('response_language').notNull().default('pt-BR'),
   tone: text('tone').notNull().default('professional'),
   restrictions: text('restrictions').array().notNull().default([]),
+  is_system: boolean('is_system').notNull().default(false),
   created_at: timestamp('created_at').defaultNow().notNull(),
   updated_at: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
