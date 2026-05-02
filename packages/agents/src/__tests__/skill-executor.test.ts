@@ -377,37 +377,6 @@ describe('executeSkill — dispatcher', () => {
     expect(mockComplete).not.toHaveBeenCalled()
   })
 
-  // ── data:extract ──────────────────────────────────────────────────────
-  it('data:extract → chama LLM e retorna ok:true', async () => {
-    const result = await executeSkill(
-      'data:extract',
-      context,
-      { content: 'Nome: João, CPF: 123.456.789-00', extract_schema: 'nome, cpf' },
-      agent,
-    )
-
-    expect(result.ok).toBe(true)
-    if (result.ok) {
-      expect(result.data.answer).toBe('Resposta do LLM mockado')
-      expect(result.data.tokens_in).toBe(100)
-      expect(result.data.tokens_out).toBe(50)
-    }
-    expect(mockComplete).toHaveBeenCalledWith(
-      'data:extract',
-      expect.objectContaining({ sensitive_data: true }),
-    )
-  })
-
-  it('data:extract → retorna INVALID_INPUT quando content está ausente', async () => {
-    const result = await executeSkill('data:extract', context, {}, agent)
-
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.error.code).toBe('INVALID_INPUT')
-    }
-    expect(mockComplete).not.toHaveBeenCalled()
-  })
-
   it('skill desconhecida → retorna ok:false com SKILL_NOT_FOUND', async () => {
     // @ts-expect-error testando skill inválida intencionalmente
     const result = await executeSkill('nonexistent:skill', context, {}, agent)

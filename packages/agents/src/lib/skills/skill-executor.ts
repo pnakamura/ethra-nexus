@@ -3,11 +3,14 @@ import { sanitizeForHtml, sanitizeErrorMessage, validateExternalUrl } from '@eth
 import { embed, extractPagesFromContent } from '@ethra-nexus/wiki'
 import { createRegistryFromEnv } from '../provider'
 import { createWikiDb } from '../db'
-import { getDb, externalAgents } from '@ethra-nexus/db'
+import { getDb, externalAgents, files, parsedFiles } from '@ethra-nexus/db'
 import { sql, eq, and } from 'drizzle-orm'
 import { emitEvent } from '../scheduler/event-bus'
 import { A2AClient } from '../a2a/client'
 import { writeLesson } from '../wiki/wiki-writer'
+import { parseFile, type ParserResult, type ParserFormat } from '../parsers'
+import { createStorageDriver } from '../storage'
+import { logger as skillLogger } from '../logger'
 
 export interface SkillInput {
   question?: string
@@ -26,7 +29,15 @@ export interface SkillOutput {
   model: string
   is_fallback: boolean
   external_task_id?: string  // set by a2a:call
+  // ── Spec #3: data:extract over file_id ──
+  parsed_id?: string
+  format?: 'xlsx' | 'pdf' | 'docx' | 'csv' | 'txt' | 'md'
+  preview_md?: string
+  pages_or_sheets?: number
+  warnings?: string[]
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // Dispatcher principal: mapeia SkillId → handler
 // Fase 7a: wiki:query e channel:respond implementados (mesmo handler: wiki search + LLM)
@@ -712,61 +723,129 @@ async function executeDataExtract(
   input: SkillInput,
   ts: string,
 ): Promise<AgentResult<SkillOutput>> {
-  const content = typeof input['content'] === 'string' ? input['content'] : ''
-
-  if (!content) {
+  const fileId = typeof input['file_id'] === 'string' ? input['file_id'] : ''
+  if (!fileId || !UUID_RE.test(fileId)) {
     return {
       ok: false,
-      error: {
-        code: 'INVALID_INPUT',
-        message: "Parâmetro 'content' é obrigatório para data:extract",
-        retryable: false,
-      },
-      agent_id: context.agent_id,
-      skill_id,
-      timestamp: ts,
+      error: { code: 'INVALID_INPUT', message: "Parâmetro 'file_id' (UUID) é obrigatório", retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
     }
   }
 
-  const extractSchema = typeof input['extract_schema'] === 'string' ? input['extract_schema'] : ''
-  const userContent = extractSchema
-    ? `Schema de extração:\n${extractSchema}\n\nDocumento:\n${content}`
-    : content
+  const db = getDb()
 
-  const registry = createRegistryFromEnv()
-  const completion = await registry.complete('data:extract', {
-    messages: [
-      {
-        role: 'system',
-        content:
-          'Você é um extrator de dados estruturados. Extraia as informações relevantes do documento fornecido e retorne em formato estruturado (JSON quando possível).',
-      },
-      { role: 'user', content: userContent },
-    ],
-    max_tokens: 1500,
-    sensitive_data: true,
+  // 1. File lookup + tenant guard
+  const fileRows = await db
+    .select({ storage_key: files.storage_key, mime_type: files.mime_type, sha256: files.sha256 })
+    .from(files)
+    .where(and(eq(files.id, fileId), eq(files.tenant_id, context.tenant_id)))
+    .limit(1)
+  const file = fileRows[0]
+  if (!file) {
+    return {
+      ok: false,
+      error: { code: 'FILE_NOT_FOUND', message: 'File not found in tenant', retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  // 2. Cache lookup
+  const cachedRows = await db
+    .select()
+    .from(parsedFiles)
+    .where(and(eq(parsedFiles.tenant_id, context.tenant_id), eq(parsedFiles.sha256, file.sha256)))
+    .limit(1)
+  const cached = cachedRows[0]
+  if (cached) {
+    skillLogger.info({ event: 'parser_cache_hit', tenant_id: context.tenant_id, sha256: file.sha256, parsed_id: cached.id })
+    return buildExtractResult(skill_id, context, ts, {
+      parsed_id: cached.id,
+      format: cached.format as ParserFormat,
+      preview_md: cached.preview_md,
+      pages_or_sheets: cached.pages_or_sheets,
+      warnings: (cached.warnings as string[]) ?? [],
+    })
+  }
+
+  // 3. Driver fetch
+  const driver = createStorageDriver()
+  const stream = await driver.get(file.storage_key)
+  if (!stream) {
+    return {
+      ok: false,
+      error: { code: 'STORAGE_ORPHAN', message: 'Driver returned null for storage_key', retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+  const buf = await streamToBuffer(stream)
+
+  // 4. Parse
+  let parsed: ParserResult
+  const parseStart = Date.now()
+  try {
+    parsed = await parseFile(buf, file.mime_type)
+  } catch (err) {
+    skillLogger.error({ event: 'parser_failed', file_id: fileId, mime_type: file.mime_type, error: sanitizeErrorMessage(err instanceof Error ? err.message : 'parser error') })
+    return {
+      ok: false,
+      error: { code: 'PARSE_FAILED', message: sanitizeErrorMessage(err instanceof Error ? err.message : 'parser error'), retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+  const parseDuration = Date.now() - parseStart
+
+  // 5. Cache write (race-safe)
+  let parsedId: string
+  try {
+    const inserted = await db
+      .insert(parsedFiles)
+      .values({
+        tenant_id: context.tenant_id,
+        sha256: file.sha256,
+        format: parsed.format,
+        structured_json: parsed.structured_json,
+        preview_md: parsed.preview_md,
+        pages_or_sheets: parsed.pages_or_sheets,
+        warnings: parsed.warnings,
+      })
+      .onConflictDoNothing({ target: [parsedFiles.tenant_id, parsedFiles.sha256] })
+      .returning({ id: parsedFiles.id })
+    if (inserted[0]) {
+      parsedId = inserted[0].id
+    } else {
+      // Race: another concurrent call won. Fetch existing.
+      const existingRows = await db
+        .select({ id: parsedFiles.id })
+        .from(parsedFiles)
+        .where(and(eq(parsedFiles.tenant_id, context.tenant_id), eq(parsedFiles.sha256, file.sha256)))
+        .limit(1)
+      parsedId = existingRows[0]!.id
+    }
+  } catch (err) {
+    skillLogger.error({ event: 'parser_cache_insert_failed', error: sanitizeErrorMessage(err instanceof Error ? err.message : 'insert error') })
+    return {
+      ok: false,
+      error: { code: 'PARSE_FAILED', message: 'Cache insert failed', retryable: true },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  skillLogger.info({
+    event: 'parser_cache_miss',
+    tenant_id: context.tenant_id,
+    sha256: file.sha256,
+    format: parsed.format,
+    parse_duration_ms: parseDuration,
+    structured_size_bytes: Buffer.byteLength(JSON.stringify(parsed.structured_json), 'utf8'),
   })
 
-  const totalTokens = completion.input_tokens + completion.output_tokens
-  const costUsd = completion.estimated_cost_usd ?? 0
-
-  return {
-    ok: true,
-    data: {
-      answer: completion.content,
-      tokens_in: completion.input_tokens,
-      tokens_out: completion.output_tokens,
-      cost_usd: costUsd,
-      provider: completion.provider,
-      model: completion.model,
-      is_fallback: completion.is_fallback,
-    },
-    agent_id: context.agent_id,
-    skill_id,
-    timestamp: ts,
-    tokens_used: totalTokens,
-    cost_usd: costUsd,
-  }
+  return buildExtractResult(skill_id, context, ts, {
+    parsed_id: parsedId,
+    format: parsed.format,
+    preview_md: parsed.preview_md,
+    pages_or_sheets: parsed.pages_or_sheets,
+    warnings: parsed.warnings,
+  })
 }
 
 async function executeA2ACall(
@@ -911,4 +990,35 @@ async function executeA2ACall(
       timestamp: ts,
     }
   }
+}
+
+function buildExtractResult(
+  skill_id: SkillId,
+  context: AgentContext,
+  ts: string,
+  fields: { parsed_id: string; format: ParserFormat; preview_md: string; pages_or_sheets: number; warnings: string[] },
+): AgentResult<SkillOutput> {
+  return {
+    ok: true,
+    data: {
+      answer: fields.preview_md,
+      tokens_in: 0, tokens_out: 0, cost_usd: 0,
+      provider: 'local', model: 'parser', is_fallback: false,
+      parsed_id: fields.parsed_id,
+      format: fields.format,
+      preview_md: fields.preview_md,
+      pages_or_sheets: fields.pages_or_sheets,
+      warnings: fields.warnings,
+    },
+    agent_id: context.agent_id, skill_id, timestamp: ts,
+    tokens_used: 0, cost_usd: 0,
+  }
+}
+
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  for await (const chunk of stream) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk as Buffer)
+  }
+  return Buffer.concat(chunks)
 }
