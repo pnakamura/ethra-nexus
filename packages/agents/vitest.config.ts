@@ -10,5 +10,11 @@ export default defineConfig({
   },
   test: {
     passWithNoTests: true,
+    server: {
+      deps: {
+        // mammoth is CJS-only with legacy transitive deps; prevent vite from bundling it
+        external: [/node_modules\/mammoth/],
+      },
+    },
   },
 })
