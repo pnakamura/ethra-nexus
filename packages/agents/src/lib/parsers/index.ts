@@ -1,6 +1,7 @@
-export { parserFor, parseFile } from './file-parser'
+export { parserFor, parseFile, parseBuffer } from './file-parser'
 export type { Parser, ParserResult, ParserFormat, ParserStructuredOutput,
               XlsxSheet, PdfPage, DocxParagraph, DocxTable, MdSection } from './parser-types'
+export type { FileType } from './file-parser'
 export { xlsxParser } from './xlsx-parser'
 export { pdfParser } from './pdf-parser'
 export { docxParser } from './docx-parser'
