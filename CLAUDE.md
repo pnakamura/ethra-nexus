@@ -445,3 +445,4 @@ docker compose -f infra/vps/docker-compose.vps.yml     up -d   # VPS Hostgator
 - `docs/adr/ADR-003-silverbullet-wiki.md` _(planejado)_
 - `docs/adr/ADR-004-multi-provider-openrouter.md` _(planejado)_
 - `docs/adr/ADR-005-modelo-c-hybrid-deployment.md` _(planejado)_
+- `docs/adr/ADR-006-1-user-per-tenant-auth.md` — modelo "1 user = 1 tenant" mantido no MVP self-hosted; adiar multi-user até cliente cloud pedir ✅
