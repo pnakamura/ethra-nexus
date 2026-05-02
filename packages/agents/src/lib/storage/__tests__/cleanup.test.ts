@@ -1,9 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MockStorageDriver } from './mock.driver'
 
-const mockDb = { execute: vi.fn() }
-vi.mock('@ethra-nexus/db', () => ({ getDb: () => mockDb }))
-vi.mock('drizzle-orm', () => ({ sql: vi.fn((parts, ...vals) => ({ sql: { parts, vals } })) }))
+const mockDb = {
+  execute: vi.fn(),
+  // delete() chain consumed by cleanup.ts:
+  //   db.delete(files).where(inArray(files.id, ids))
+  delete: vi.fn(() => ({
+    where: () => Promise.resolve(),
+  })),
+}
+vi.mock('@ethra-nexus/db', () => ({
+  getDb: () => mockDb,
+  files: {
+    id: 'files.id',
+    tenant_id: 'files.tenant_id',
+    storage_key: 'files.storage_key',
+    expires_at: 'files.expires_at',
+  },
+}))
+vi.mock('drizzle-orm', () => ({
+  sql: vi.fn((parts, ...vals) => ({ sql: { parts, vals } })),
+  inArray: vi.fn((c, vals) => ({ inArray: { c, vals } })),
+}))
 
 const { cleanupExpiredFiles } = await import('../cleanup')
 

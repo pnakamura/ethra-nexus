@@ -4,15 +4,27 @@ const mockDb = {
   execute: vi.fn(),
   select: vi.fn(),
   insert: vi.fn(),
-  update: vi.fn(),
+  update: vi.fn(() => ({
+    set: () => ({ where: () => Promise.resolve() }),
+  })),
 }
 vi.mock('@ethra-nexus/db', () => ({
   getDb: () => mockDb,
+  // systemAlerts is consumed by storage-alerts.ts when calling
+  // db.update(systemAlerts).set(...).where(inArray(systemAlerts.id, ids))
+  systemAlerts: {
+    id: 'systemAlerts.id',
+    tenant_id: 'systemAlerts.tenant_id',
+    category: 'systemAlerts.category',
+    code: 'systemAlerts.code',
+    resolved_at: 'systemAlerts.resolved_at',
+  },
 }))
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((c, v) => ({ eq: { c, v } })),
   and: vi.fn((...c) => ({ and: c })),
   isNull: vi.fn((c) => ({ isnull: c })),
+  inArray: vi.fn((c, vals) => ({ inArray: { c, vals } })),
   sql: vi.fn((parts, ...vals) => ({ sql: { parts, vals } })),
 }))
 
