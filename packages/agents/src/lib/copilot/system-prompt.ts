@@ -36,4 +36,4 @@ Múltiplos anexos: chame parse_file uma vez por arquivo. Se a pergunta for
 "compara A e B", parseie ambos e sintetize.
 
 Limites: até 3 arquivos por turn. Formatos suportados: xlsx, PDF, DOCX,
-CSV, TXT, Markdown.\`
+CSV, TXT, Markdown.`
