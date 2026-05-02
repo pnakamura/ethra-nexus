@@ -27,11 +27,11 @@ const { cleanupExpiredFiles } = await import('../cleanup')
 
 describe('cleanupExpiredFiles', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    // Re-setup the chain mock for db.delete(files).where(...) after clear.
-    mockDb.delete.mockImplementation(() => ({
+    mockDb.execute.mockReset()
+    mockDb.delete.mockReset()
+    mockDb.delete.mockReturnValue({
       where: () => Promise.resolve(),
-    }))
+    } as unknown as ReturnType<typeof mockDb.delete>)
   })
 
   it('returns 0 when no expired files', async () => {

@@ -32,13 +32,15 @@ const { computeStorageAlerts } = await import('../storage-alerts')
 
 describe('computeStorageAlerts', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    // vi.clearAllMocks() resets implementations too; re-setup the chain mock
-    // for db.update(systemAlerts).set(...).where(...). Without this, the await
-    // throws and stats.resolved doesn't increment.
-    mockDb.update.mockImplementation(() => ({
+    // Reset all mocks to wipe queued mockResolvedValueOnce + call history.
+    // clearAllMocks only clears history; resetAllMocks also clears implementations.
+    // We want history cleared (test isolation) but implementations preserved
+    // (the update chain). So clear, then re-stamp the chain.
+    mockDb.execute.mockReset()
+    mockDb.update.mockReset()
+    mockDb.update.mockReturnValue({
       set: () => ({ where: () => Promise.resolve() }),
-    }))
+    } as unknown as ReturnType<typeof mockDb.update>)
   })
 
   it('does nothing for tenants without storage_limit_bytes', async () => {
