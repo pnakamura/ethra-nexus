@@ -9,6 +9,8 @@ export {
   validateContentLength,
   validateUUID,
   validateExternalUrl,
+  validateMimeType,
+  validateExpiresAt,
   SecurityValidationError,
 } from './validate'
 

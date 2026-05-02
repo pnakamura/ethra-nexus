@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@ethra-nexus/core': resolve(__dirname, '../core/src/index.ts'),
+      '@ethra-nexus/db': resolve(__dirname, '../db/src/index.ts'),
     },
   },
   test: {

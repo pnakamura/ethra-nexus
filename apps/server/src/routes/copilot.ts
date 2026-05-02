@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
-import { eq, and, asc, desc } from 'drizzle-orm'
+import { eq, and, asc, desc, isNull } from 'drizzle-orm'
 import {
-  getDb, copilotConversations, copilotMessages, agents,
+  getDb, copilotConversations, copilotMessages, agents, systemAlerts,
 } from '@ethra-nexus/db'
 import { executeCopilotTurn, generateAutoTitle, AIOS_MASTER_SYSTEM_PROMPT } from '@ethra-nexus/agents'
 
@@ -32,7 +32,29 @@ export async function copilotRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireCopilotAccess)
 
   app.get('/copilot/health', async (request) => {
-    return { ok: true, user_slug: request.userSlug, role: request.userRole }
+    const db = getDb()
+    const banner_rows = await db.select({
+      id: systemAlerts.id,
+      category: systemAlerts.category,
+      code: systemAlerts.code,
+      severity: systemAlerts.severity,
+      message: systemAlerts.message,
+      fired_at: systemAlerts.fired_at,
+    })
+      .from(systemAlerts)
+      .where(and(
+        eq(systemAlerts.tenant_id, request.tenantId),
+        eq(systemAlerts.category, 'storage'),
+        eq(systemAlerts.code, 'hard_limit'),
+        isNull(systemAlerts.resolved_at),
+      ))
+
+    return {
+      ok: true,
+      user_slug: request.userSlug,
+      role: request.userRole,
+      banner_alerts: banner_rows,
+    }
   })
 
   // POST /copilot/conversations — create a new thread

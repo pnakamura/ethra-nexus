@@ -221,3 +221,28 @@ export async function validateExternalUrl(url: string): Promise<void> {
     }
   }
 }
+
+// ── MIME Type ────────────────────────────────────────────
+
+const MIME_RE = /^[a-z]+\/[a-z0-9\-+.]+$/i
+
+export function validateMimeType(input: string): string {
+  if (typeof input !== 'string' || !MIME_RE.test(input)) {
+    throw new SecurityValidationError('Invalid mime_type')
+  }
+  return input
+}
+
+// ── Expires At ───────────────────────────────────────────
+
+export function validateExpiresAt(input: string | null | undefined): Date | null {
+  if (input === null || input === undefined) return null
+  const d = new Date(input)
+  if (isNaN(d.getTime())) {
+    throw new SecurityValidationError('Invalid expires_at: must be ISO8601')
+  }
+  if (d.getTime() <= Date.now() + 60_000) {
+    throw new SecurityValidationError('Invalid expires_at: must be at least 1 minute in the future (not in the past)')
+  }
+  return d
+}

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const mockDb = {
@@ -13,6 +13,7 @@ vi.mock('@ethra-nexus/db', () => ({
   copilotConversations: { id: 'id', tenant_id: 'tid', user_id: 'uid', agent_id: 'aid', title: 'title', status: 'status', last_message_at: 'lma', updated_at: 'ua' },
   copilotMessages: { conversation_id: 'cid', tenant_id: 'tid', created_at: 'ca' },
   agents: { id: 'id', tenant_id: 'tid', slug: 'slug', system_prompt: 'sp' },
+  systemAlerts: { id: 'id', tenant_id: 'tid', category: 'cat', code: 'code', severity: 'sev', message: 'msg', fired_at: 'fat', resolved_at: 'rat' },
 }))
 
 vi.mock('@ethra-nexus/agents', () => ({
@@ -26,6 +27,7 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn((...c) => ({ c })),
   desc: vi.fn((c) => ({ desc: c })),
   asc: vi.fn((c) => ({ asc: c })),
+  isNull: vi.fn((c) => ({ isnull: c })),
 }))
 
 const { copilotRoutes } = await import('../routes/copilot')
@@ -167,5 +169,33 @@ describe('POST /api/v1/copilot/conversations/:id/messages', () => {
     })
     expect(res.statusCode).toBe(404)
     await app.close()
+  })
+})
+
+describe('GET /api/v1/copilot/health (banner_alerts)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('returns empty banner_alerts when no hard_limit is active', async () => {
+    const app = await buildApp('s', 'tenant-1', 'admin')
+    mockDb.select.mockReturnValueOnce({
+      from: () => ({ where: () => Promise.resolve([]) })
+    })
+    const res = await app.inject({ method: 'GET', url: '/api/v1/copilot/health' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().banner_alerts).toEqual([])
+  })
+
+  it('returns active hard_limit alerts in banner_alerts', async () => {
+    const app = await buildApp('s', 'tenant-1', 'admin')
+    mockDb.select.mockReturnValueOnce({
+      from: () => ({ where: () => Promise.resolve([
+        { id: 'a1', category: 'storage', code: 'hard_limit', severity: 'critical',
+          message: 'Storage at 96%', fired_at: new Date('2026-04-29') },
+      ]) })
+    })
+    const res = await app.inject({ method: 'GET', url: '/api/v1/copilot/health' })
+    const banner = res.json().banner_alerts
+    expect(banner).toHaveLength(1)
+    expect(banner[0].code).toBe('hard_limit')
   })
 })
