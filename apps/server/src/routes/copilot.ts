@@ -15,6 +15,8 @@ declare module 'fastify' {
 // Per-conversation lock to block overlapping turns. In-memory; sufficient for single-instance.
 const turnLocks = new Set<string>()
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 // JWT actual shape (auth.ts:37-40): { tenantId, slug, role: 'admin' }.
 // No email/sub field. We use slug as the user identity (1 user per tenant
 // in current model) and gate on role === 'admin' for the copilot.
@@ -158,7 +160,10 @@ export async function copilotRoutes(app: FastifyInstance) {
   // POST /copilot/conversations/:id/messages — SSE turn loop (Task 23)
   app.post<{
     Params: { id: string }
-    Body: { content: string }
+    Body: {
+      content: string
+      attachments?: Array<{ file_id: string; filename: string }>
+    }
   }>('/copilot/conversations/:id/messages', async (request, reply) => {
     const { id } = request.params
     const content = request.body?.content
@@ -167,6 +172,18 @@ export async function copilotRoutes(app: FastifyInstance) {
     }
     if (content.length > 50000) {
       return reply.status(413).send({ error: 'CONTENT_TOO_LARGE' })
+    }
+
+    const attachments = request.body?.attachments ?? []
+    if (attachments.length > 3) {
+      return reply.status(400).send({ error: 'TOO_MANY_ATTACHMENTS', message: 'Máximo 3 anexos por mensagem' })
+    }
+    for (const att of attachments) {
+      if (typeof att?.file_id !== 'string' || !UUID_RE.test(att.file_id)
+          || typeof att?.filename !== 'string' || att.filename.length === 0
+          || att.filename.length > 255) {
+        return reply.status(400).send({ error: 'INVALID_ATTACHMENT', message: 'file_id deve ser UUID e filename 1-255 chars' })
+      }
     }
 
     const db = getDb()
@@ -213,6 +230,13 @@ export async function copilotRoutes(app: FastifyInstance) {
       .limit(1)
     const systemPrompt = agentRows[0]?.system_prompt ?? AIOS_MASTER_SYSTEM_PROMPT
 
+    const attachmentMarkers = attachments
+      .map(a => `[user attached file_id=${a.file_id} filename=${a.filename}]`)
+      .join('\n')
+    const compositeContent = attachments.length > 0
+      ? `${attachmentMarkers}\n\n${content}`
+      : content
+
     try {
       await executeCopilotTurn({
         conversation_id: id,
@@ -220,7 +244,7 @@ export async function copilotRoutes(app: FastifyInstance) {
         user_id: request.userSlug!,
         user_role: request.userRole!,
         aios_master_agent_id: conv.agent_id,
-        content,
+        content: compositeContent,
         system_prompt: systemPrompt,
         sse: { write: sseWrite },
         abortSignal: abortController.signal,
