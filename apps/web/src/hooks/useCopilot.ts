@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { streamCopilotMessage, type SSEEvent } from '@/lib/copilot-stream'
+import { streamCopilotMessage, type SSEEvent, type AttachmentRef } from '@/lib/copilot-stream'
 import { STORAGE_KEY } from '@/contexts/AuthContext'
 
 export interface CopilotConversation {
@@ -138,7 +138,7 @@ export function useSendCopilotMessage(conversationId: string | null) {
   const abortRef = useRef<AbortController | null>(null)
 
   const send = useCallback(
-    async (content: string) => {
+    async (content: string, attachments?: AttachmentRef[]) => {
       if (!conversationId) return
       abortRef.current?.abort()
       const ac = new AbortController()
@@ -184,6 +184,7 @@ export function useSendCopilotMessage(conversationId: string | null) {
           },
           ac.signal,
           () => localStorage.getItem(STORAGE_KEY),
+          attachments,
         )
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {

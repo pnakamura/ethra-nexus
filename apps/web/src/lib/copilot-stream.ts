@@ -25,15 +25,29 @@ export function parseSSEChunks(
   return incomplete
 }
 
+export interface AttachmentRef {
+  file_id: string
+  filename: string
+}
+
+interface SendBody {
+  content: string
+  attachments?: AttachmentRef[]
+}
+
 export async function streamCopilotMessage(
   conversationId: string,
   content: string,
   onEvent: (e: SSEEvent) => void,
   signal: AbortSignal,
   getToken: () => string | null,
+  attachments?: AttachmentRef[],
 ): Promise<void> {
   const token = getToken()
   if (!token) throw new Error('Missing auth token')
+
+  const body: SendBody = { content }
+  if (attachments && attachments.length > 0) body.attachments = attachments
 
   const baseUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api/v1'
   const res = await fetch(`${baseUrl}/copilot/conversations/${conversationId}/messages`, {
@@ -43,7 +57,7 @@ export async function streamCopilotMessage(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {

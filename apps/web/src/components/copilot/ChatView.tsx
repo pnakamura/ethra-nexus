@@ -67,7 +67,7 @@ export function ChatView({ conversationId, stream, onToolClick }: Props) {
       />
 
       <MessageInput
-        onSend={(content, _attachments) => stream.send(content)}
+        onSend={(content, attachments) => stream.send(content, attachments)}
         disabled={stream.isStreaming}
       />
     </div>
