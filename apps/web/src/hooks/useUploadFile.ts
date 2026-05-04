@@ -19,8 +19,14 @@ export function useUploadFile() {
       const fd = new FormData()
       fd.append('file', file)
       fd.append('expires_at', new Date(Date.now() + TTL_MS).toISOString())
+      // IMPORTANT: do NOT set Content-Type manually. Axios + browser need to
+      // build "multipart/form-data; boundary=----..." together, including the
+      // boundary parameter. If we set Content-Type ourselves the boundary is
+      // missing and the server rejects the malformed body (often with 413).
+      // We override the api instance default 'application/json' by passing
+      // `Content-Type: undefined` which Axios treats as "let the engine pick".
       const res = await api.post<UploadResponse>('/files', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined as unknown as string },
       })
       return res.data
     },
