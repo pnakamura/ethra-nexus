@@ -12,7 +12,12 @@ vi.mock('@/hooks/useUploadFile', () => ({
   }),
 }))
 const toastMock = vi.fn()
-vi.mock('sonner', () => ({ toast: { error: toastMock, success: toastMock } }))
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastMock(...args),
+    success: (...args: unknown[]) => toastMock(...args),
+  },
+}))
 
 function wrap(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
