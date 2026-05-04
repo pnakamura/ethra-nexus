@@ -373,6 +373,9 @@ export type AgentErrorCode =
   | 'WIKI_ERROR'
   | 'CHANNEL_ERROR'
   | 'EXTERNAL_AGENT_ERROR'
+  | 'FILE_NOT_FOUND'        // Spec #3: data:extract — file row missing
+  | 'STORAGE_ORPHAN'        // Spec #3: data:extract — driver returned null
+  | 'PARSE_FAILED'          // Spec #3: data:extract — parser threw
   | 'UNKNOWN'
 
 export interface AiosEvent {
