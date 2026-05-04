@@ -159,13 +159,17 @@ Skills built-in do Ethra Nexus:
 | `monitor:health` | Health check de processos | Groq/OpenRouter |
 | `monitor:alert` | Avalia condições e dispara alertas | Groq/OpenRouter |
 | `data:analyze` | Analisa dados estruturados | Gemini/OpenRouter |
-| `data:extract` | Extrai dados de documentos | Anthropic |
+| `data:extract` | Cache-first parser dispatcher: file_id → driver fetch → `parseFile(buffer, mime)` → INSERT cache → preview_md. Provider local. Spec #3 |
 | `a2a:call` | Chama agente externo via protocolo A2A | (delegado) |
 
 Skills custom: `custom:{nome}` — implementadas via N8N workflows.
 
 **Adicional (Spec #1):** `copilot:turn` — skill interna do AIOS Master Agent
 shell, registrada em `provider_usage_log` quando o `/copilot` é usado.
+
+**Adicional (Spec #3):** `system:parse_file` — copilot tool registrada em `allCopilotTools`
+que delega via `executeTask` pro agente seed `input-worker` (slug fixo, `is_system=TRUE`,
+1 por tenant) que executa `data:extract`. Suporta xlsx/pdf/docx/csv/txt/md.
 
 **Não existem "tipos de agente" hardcoded.** Um agente de "atendimento" é simplesmente
 um agente com skills `wiki:query` + `channel:respond` e canais WhatsApp/webchat.
@@ -278,6 +282,7 @@ em `packages/wiki/` mas a implementação distribuiu pelo backend e skills.
 | `copilot_conversations` | Threads do AIOS Master shell (admin-only) |
 | `copilot_messages` | Mensagens (Anthropic content blocks JSONB) |
 | `copilot_tool_calls` | Tool calls executadas durante turn loop |
+| `parsed_files` | Cache de parsing por sha256 — `structured_json` + `preview_md` por `(tenant_id, sha256)`. Spec #3 |
 
 **Não existem `tenant_members`, `agent_conversations`, `agent_messages`, `wiki_pages`,
 `agent_budget_periods` nem `wiki_operation_log` (singular).** Em rascunhos antigos
