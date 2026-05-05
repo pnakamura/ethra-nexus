@@ -1,9 +1,15 @@
+import { randomUUID, createHash } from 'node:crypto'
 import type { SkillId, AgentResult, AgentContext } from '@ethra-nexus/core'
 import { sanitizeForHtml, sanitizeErrorMessage, validateExternalUrl } from '@ethra-nexus/core'
+import {
+  sanitizeDataForRenderPrompt,
+  validateArtifactHtml,
+  RENDER_SYSTEM_PROMPT,
+} from '../render'
 import { embed, extractPagesFromContent } from '@ethra-nexus/wiki'
 import { createRegistryFromEnv } from '../provider'
 import { createWikiDb } from '../db'
-import { getDb, externalAgents, files, parsedFiles } from '@ethra-nexus/db'
+import { getDb, externalAgents, files, parsedFiles, artifacts } from '@ethra-nexus/db'
 import { sql, eq, and } from 'drizzle-orm'
 import { emitEvent } from '../scheduler/event-bus'
 import { A2AClient } from '../a2a/client'
@@ -35,6 +41,11 @@ export interface SkillOutput {
   preview_md?: string
   pages_or_sheets?: number
   warnings?: string[]
+  // ── Spec #4: data:render artifact ──
+  artifact_id?: string
+  download_url?: string
+  title?: string
+  size_bytes?: number
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -91,6 +102,10 @@ export async function executeSkill(
 
   if (skill_id === 'data:extract') {
     return executeDataExtract(skill_id, context, input, ts)
+  }
+
+  if (skill_id === 'data:render') {
+    return executeDataRender(skill_id, context, input, ts)
   }
 
   if (skill_id === 'a2a:call') {
@@ -846,6 +861,206 @@ async function executeDataExtract(
     pages_or_sheets: parsed.pages_or_sheets,
     warnings: parsed.warnings,
   })
+}
+
+const RENDER_DATA_MAX_BYTES = 100 * 1024  // 100KB serialized
+const RENDER_TITLE_MAX = 200
+const RENDER_PROMPT_MAX = 2000
+
+async function executeDataRender(
+  skill_id: SkillId,
+  context: AgentContext,
+  input: SkillInput,
+  ts: string,
+): Promise<AgentResult<SkillOutput>> {
+  // 1. Input validation
+  const title = typeof input['title'] === 'string' ? input['title'] : ''
+  const prompt = typeof input['prompt'] === 'string' ? input['prompt'] : ''
+  const data = input['data']
+  const conversationId = typeof input['conversation_id'] === 'string' ? input['conversation_id'] : ''
+  const parsedId = typeof input['parsed_id'] === 'string' ? input['parsed_id'] : undefined
+
+  if (!title || title.length > RENDER_TITLE_MAX) {
+    return {
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: `title required, ≤${RENDER_TITLE_MAX} chars`, retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+  if (!prompt || prompt.length > RENDER_PROMPT_MAX) {
+    return {
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: `prompt required, ≤${RENDER_PROMPT_MAX} chars`, retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+  if (!data || typeof data !== 'object') {
+    return {
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'data must be an object', retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+  const dataJson = JSON.stringify(data)
+  if (Buffer.byteLength(dataJson, 'utf8') > RENDER_DATA_MAX_BYTES) {
+    return {
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: `data payload exceeds ${RENDER_DATA_MAX_BYTES} bytes`, retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+  if (!conversationId || !UUID_RE.test(conversationId)) {
+    return {
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'conversation_id (UUID) is required', retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+  if (parsedId !== undefined && !UUID_RE.test(parsedId)) {
+    return {
+      ok: false,
+      error: { code: 'INVALID_INPUT', message: 'parsed_id must be a UUID when provided', retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  // 2. Sanitize data
+  const sanitized = sanitizeDataForRenderPrompt(data)
+
+  // 3. Compose render prompt + Anthropic call
+  const userMessage = `Gere um dashboard HTML com o título: ${title}
+
+Pergunta original do user: ${prompt}
+
+Dados (sanitizados):
+${JSON.stringify(sanitized, null, 2)}`
+
+  const registry = createRegistryFromEnv()
+  let completion
+  try {
+    completion = await registry.complete('data:render', {
+      messages: [
+        { role: 'system', content: RENDER_SYSTEM_PROMPT },
+        { role: 'user', content: userMessage },
+      ],
+      max_tokens: 8000,
+      sensitive_data: true,
+    })
+  } catch (err) {
+    skillLogger.error({ event: 'render_anthropic_error', error: sanitizeErrorMessage(err instanceof Error ? err.message : 'unknown') })
+    return {
+      ok: false,
+      error: { code: 'AI_ERROR', message: sanitizeErrorMessage(err instanceof Error ? err.message : 'anthropic call failed'), retryable: true },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  // 4. Extract HTML from response
+  let html = completion.content.trim()
+  const fenceMatch = /```(?:html)?\s*([\s\S]+?)\s*```/.exec(html)
+  if (fenceMatch && fenceMatch[1]) html = fenceMatch[1].trim()
+  if (!/<!DOCTYPE html>|<html[\s>]/i.test(html)) {
+    skillLogger.error({ event: 'render_no_html', preview: html.slice(0, 200) })
+    return {
+      ok: false,
+      error: { code: 'RENDER_FAILED', message: 'no html in response', retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  // 5. Validate HTML
+  const validation = validateArtifactHtml(html)
+  if (!validation.ok) {
+    skillLogger.error({ event: 'render_validation_failed', reason: validation.reason })
+    return {
+      ok: false,
+      error: { code: 'RENDER_FAILED', message: `validation: ${validation.reason}`, retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  // 6. Compute sha256 + write to driver
+  const htmlBuf = Buffer.from(html, 'utf8')
+  const sha256 = createHash('sha256').update(htmlBuf).digest('hex')
+  const artifactId = randomUUID()
+
+  const driver = createStorageDriver()
+  let putResult
+  try {
+    putResult = await driver.put({
+      tenant_id: context.tenant_id,
+      file_id: artifactId,
+      bytes: htmlBuf,
+      mime_type: 'text/html',
+    })
+  } catch (err) {
+    skillLogger.error({ event: 'render_storage_failed', error: sanitizeErrorMessage(err instanceof Error ? err.message : 'storage error') })
+    return {
+      ok: false,
+      error: { code: 'DB_ERROR', message: 'storage write failed', retryable: true },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  // 7. INSERT artifacts row
+  const db = getDb()
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  try {
+    await db.insert(artifacts).values({
+      id: artifactId,
+      tenant_id: context.tenant_id,
+      conversation_id: conversationId,
+      parsed_id: parsedId ?? null,
+      storage_key: putResult.storage_key,
+      sha256,
+      size_bytes: putResult.size_bytes,
+      mime_type: 'text/html',
+      title,
+      prompt,
+      generated_by_agent_id: context.agent_id,
+      expires_at: expiresAt,
+    })
+  } catch (err) {
+    skillLogger.error({ event: 'render_insert_failed', error: sanitizeErrorMessage(err instanceof Error ? err.message : 'insert error') })
+    // Best-effort cleanup of orphaned bytes
+    void driver.delete(putResult.storage_key).catch(() => undefined)
+    return {
+      ok: false,
+      error: { code: 'DB_ERROR', message: 'INSERT artifacts failed', retryable: false },
+      agent_id: context.agent_id, skill_id, timestamp: ts,
+    }
+  }
+
+  skillLogger.info({
+    event: 'render_succeeded',
+    tenant_id: context.tenant_id,
+    artifact_id: artifactId,
+    size_bytes: putResult.size_bytes,
+    cost_usd: completion.estimated_cost_usd,
+  })
+
+  // 8. Build output
+  const totalTokens = completion.input_tokens + completion.output_tokens
+  const costUsd = completion.estimated_cost_usd ?? 0
+  return {
+    ok: true,
+    data: {
+      answer: `Dashboard "${title}" gerado.`,
+      tokens_in: completion.input_tokens,
+      tokens_out: completion.output_tokens,
+      cost_usd: costUsd,
+      provider: completion.provider,
+      model: completion.model,
+      is_fallback: completion.is_fallback,
+      artifact_id: artifactId,
+      download_url: `/api/v1/artifacts/${artifactId}/view`,
+      title,
+      size_bytes: putResult.size_bytes,
+    },
+    agent_id: context.agent_id, skill_id, timestamp: ts,
+    tokens_used: totalTokens,
+    cost_usd: costUsd,
+  }
 }
 
 async function executeA2ACall(

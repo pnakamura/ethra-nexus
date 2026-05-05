@@ -58,6 +58,7 @@ export type BuiltinSkillId =
   | 'monitor:alert'     // avalia condições e dispara alertas
   | 'data:analyze'      // analisa dados estruturados (CSV, JSON, planilhas)
   | 'data:extract'      // extrai dados de documentos não-estruturados
+  | 'data:render'       // gera dashboard HTML a partir de dados (Spec #4)
   | 'a2a:call'          // delega task para agente externo via protocolo A2A
 
 export type SkillId = BuiltinSkillId | `custom:${string}`
