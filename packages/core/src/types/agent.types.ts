@@ -377,6 +377,7 @@ export type AgentErrorCode =
   | 'FILE_NOT_FOUND'        // Spec #3: data:extract — file row missing
   | 'STORAGE_ORPHAN'        // Spec #3: data:extract — driver returned null
   | 'PARSE_FAILED'          // Spec #3: data:extract — parser threw
+  | 'RENDER_FAILED'         // Spec #4: data:render — HTML extract or validation failed
   | 'UNKNOWN'
 
 export interface AiosEvent {
