@@ -10,6 +10,8 @@ import { wikiQueryTool } from './wiki-query'
 import { listStorageAlertsTool } from './list-storage-alerts'
 import { getStorageUsageTool } from './get-storage-usage'
 import { parseFileTool } from './parse-file'
+import { queryParsedFileTool } from './query-parsed-file'
+import { renderDashboardTool } from './render-dashboard'
 
 export const allCopilotTools: CopilotTool[] = [
   listAgentsTool,
@@ -23,6 +25,8 @@ export const allCopilotTools: CopilotTool[] = [
   listStorageAlertsTool,
   getStorageUsageTool,
   parseFileTool,
+  queryParsedFileTool,      // 12ª (Spec #4)
+  renderDashboardTool,      // 13ª (Spec #4)
 ] as CopilotTool[]
 
 // Anthropic returns tool_use.name with ':' transformed to '_' (see getToolsForAnthropic).
