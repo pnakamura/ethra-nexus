@@ -128,7 +128,12 @@ function blockCost(tokens_in: number, tokens_out: number): number {
 
 export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<TurnResult> {
   const db = getDb()
-  const ctx: ToolContext = { tenant_id: p.tenant_id, user_id: p.user_id, user_role: p.user_role }
+  const ctx: ToolContext = {
+    tenant_id: p.tenant_id,
+    user_id: p.user_id,
+    user_role: p.user_role,
+    conversation_id: p.conversation_id,
+  }
   const agentsDb = createAgentsDb()
   const month = new Date().toISOString().slice(0, 7)
 

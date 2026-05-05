@@ -5,6 +5,7 @@ export interface ToolContext {
   tenant_id: string
   user_id: string
   user_role: 'admin' | 'member'
+  conversation_id: string  // Spec #4 — needed by render_dashboard
 }
 
 export interface CopilotTool<TInput = unknown, TOutput = unknown> {
