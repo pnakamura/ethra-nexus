@@ -22,6 +22,7 @@ import { a2aManagementRoutes, a2aProtocolRoutes, a2aPublicRoutes } from './route
 import { wizardRoutes } from './routes/wizard'
 import { dashboardRoutes } from './routes/dashboard'
 import { copilotRoutes } from './routes/copilot'
+import { artifactsRoutes } from './routes/artifacts'
 import { fileRoutes } from './routes/files'
 import { startSchedulerLoop } from '@ethra-nexus/agents'
 
@@ -99,6 +100,7 @@ export async function buildApp() {
   await app.register(dashboardRoutes, { prefix: '/api/v1' })
   await app.register(copilotRoutes, { prefix: '/api/v1' })
   await app.register(fileRoutes, { prefix: '/api/v1' })
+  await app.register(artifactsRoutes, { prefix: '/api/v1' })
 
   startSchedulerLoop()
 
