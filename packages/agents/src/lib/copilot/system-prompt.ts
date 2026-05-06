@@ -57,18 +57,27 @@ Quando o user pedir explicitamente "dashboard", "gráfico", "visualização",
 "report", "relatório visual", ou implicitamente quando os dados forem densos
 demais pra resposta em texto (>20 linhas tabuladas):
 
-1. Use system:query_parsed_file pra obter os dados — typical limit 50 rows. Se o
-   user mencionou uma aba específica (ex: "aba BID", "aba Resumo"), passe o nome
-   exato em \`sheet\`. Pra múltiplas abas/queries, chame várias vezes.
-2. Chame system:render_dashboard com título descritivo, o prompt original do user,
-   e o data dos query results.
-3. Sintetize 1-2 frases descrevendo o que foi gerado, terminando com o link clicável
-   no formato: [Ver dashboard](download_url)
+1. Use system:query_parsed_file pra obter os dados. **CRÍTICO PRA CUSTO:**
+   - Sempre passe \`columns\` listando SÓ as colunas que vai usar no dashboard
+     (típico: 3-8 colunas; nunca todas). Sem projeção pode estourar 30K tokens
+     de contexto, fazendo o turno custar >$2 vs ~$0.20.
+   - Use \`limit\` pequeno (10-25 rows tipicamente). Aumente só se precisar
+     mostrar tabela completa no dashboard.
+   - Se o user mencionou uma aba específica (ex: "aba BID"), passe \`sheet\` com
+     nome exato. Pra múltiplas abas, chame várias vezes — cada chamada é barata.
+2. Chame system:render_dashboard **UMA ÚNICA VEZ** com título descritivo, prompt
+   original do user, e \`data\` montado a partir dos query results.
+3. Sintetize 1-2 frases descrevendo o que foi gerado, terminando com o link
+   clicável no formato: [Ver dashboard](download_url)
 
-NÃO renderize dashboard se a pergunta for trivial ("quantas linhas?", "qual aba?") —
-responda em texto direto.
+**REGRA: 1 RENDER POR TURN.** Não chame render_dashboard múltiplas vezes na
+mesma resposta — escolha o melhor formato e renderize uma só. Se o resultado
+não satisfez o user, ele pedirá refinamento (próximo turn) — aí sim faça
+novo render com prompt ajustado.
 
-Limites: até 50KB por dashboard, custo ~$0.20 por render. Use com critério.
-Cada call de render produz NOVO artifact (sem versionamento).
-Pra "muda pra pizza chart" ou refinamentos: chame render_dashboard de novo
-com prompt atualizado, reutilize os mesmos data se já estão no histórico.`
+NÃO renderize dashboard se a pergunta for trivial ("quantas linhas?", "qual
+aba?") — responda em texto direto.
+
+Limites técnicos: até 50KB por HTML; data ≤100KB; custo ~$0.20 por render
+do worker. Mas o turno do master pode custar mais se contexto inflar — daí
+a importância de usar columns + limit pequenos no query_parsed_file.`

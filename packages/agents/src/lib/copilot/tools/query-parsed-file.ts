@@ -4,7 +4,9 @@ import type { CopilotTool } from '../tool-registry'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HARD_MAX_LIMIT = 500
-const DEFAULT_LIMIT = 100
+// Default = 25 (was 100). Master can override via input.limit. Smaller default
+// keeps context compact — large defaults drove >$2 turn costs (Spec #4 smoke).
+const DEFAULT_LIMIT = 25
 
 type ParserFormat = 'xlsx' | 'pdf' | 'docx' | 'csv' | 'txt' | 'md'
 
@@ -35,6 +37,12 @@ export const queryParsedFileTool: CopilotTool<Input, Output> = {
     'Use sempre que o user pedir conteúdo específico, incluindo abas diferentes da',
     'primeira (xlsx tem múltiplas abas — todas estão cacheadas).',
     'Sem LLM call, é rápido e barato — chame múltiplas vezes se precisar.',
+    '',
+    'PRÁTICAS PARA REDUZIR CUSTO:',
+    '- SEMPRE passe `columns` com SÓ as colunas que precisa (ex: ["nome","valor"]).',
+    '  Sem projeção, retorna todas as colunas — pode estourar 30K tokens.',
+    '- Use `limit` pequeno (default 25). Aumente só quando explicitamente precisar.',
+    '- Use `filter` pra reduzir rows server-side antes de receber.',
     '',
     'Args:',
     '- parsed_id (UUID, obrigatório): id retornado por parse_file',
