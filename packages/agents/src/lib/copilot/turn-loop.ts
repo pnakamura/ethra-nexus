@@ -50,6 +50,8 @@ interface AssistantStepResult {
   blocks: ContentBlock[]
   tokens_in: number
   tokens_out: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
   stop_reason: string
 }
 
@@ -60,11 +62,23 @@ async function streamAssistantStep(args: {
   sse: SseWriter
 }): Promise<AssistantStepResult> {
   const anth = getAnthropicClient()
+
+  // Prompt caching: system prompt + tool list are static across turns and
+  // across users in a tenant. cache_control: ephemeral → 5-min TTL. First
+  // call writes (1.25× input price), subsequent calls within the window read
+  // (0.1× input price). Net: ~70%+ savings on input tokens for the master,
+  // since system + tools dwarf the per-turn message growth.
+  const tools = getToolsForAnthropic(allCopilotTools)
+  const lastTool = tools[tools.length - 1]
+  const cachedTools = lastTool
+    ? [...tools.slice(0, -1), { ...lastTool, cache_control: { type: 'ephemeral' as const } }]
+    : tools
+
   const stream = await anth.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    system: args.system,
-    tools: getToolsForAnthropic(allCopilotTools),
+    system: [{ type: 'text', text: args.system, cache_control: { type: 'ephemeral' as const } }],
+    tools: cachedTools,
     messages: args.history,
     stream: true,
   }, { signal: args.abortSignal })
@@ -75,10 +89,30 @@ async function streamAssistantStep(args: {
   let currentToolJson = ''
   let tokensIn = 0
   let tokensOut = 0
+  let cacheCreate = 0
+  let cacheRead = 0
   let stopReason = 'end_turn'
 
   for await (const ev of stream as AsyncIterable<{ type: string; [k: string]: unknown }>) {
-    if (ev.type === 'content_block_start') {
+    if (ev.type === 'message_start') {
+      // Anthropic streams full input usage (incl. cache fields) in message_start.
+      // message_delta later carries the cumulative output_tokens only.
+      const msg = ev['message'] as {
+        usage?: {
+          input_tokens?: number
+          output_tokens?: number
+          cache_creation_input_tokens?: number
+          cache_read_input_tokens?: number
+        }
+      }
+      const u = msg?.usage
+      if (u) {
+        tokensIn += u.input_tokens ?? 0
+        tokensOut += u.output_tokens ?? 0
+        cacheCreate += u.cache_creation_input_tokens ?? 0
+        cacheRead += u.cache_read_input_tokens ?? 0
+      }
+    } else if (ev.type === 'content_block_start') {
       const cb = ev['content_block'] as { type: string; id?: string; name?: string; input?: Record<string, unknown> }
       if (cb.type === 'text') {
         currentText = ''
@@ -110,20 +144,41 @@ async function streamAssistantStep(args: {
       }
     } else if (ev.type === 'message_delta') {
       const md = ev['delta'] as { stop_reason?: string }
-      const usage = ev['usage'] as { input_tokens?: number; output_tokens?: number }
+      const usage = ev['usage'] as { output_tokens?: number } | undefined
       if (md.stop_reason) stopReason = md.stop_reason
-      if (usage) {
-        tokensIn += usage.input_tokens ?? 0
-        tokensOut += usage.output_tokens ?? 0
+      if (usage && usage.output_tokens != null) {
+        // message_delta usage carries cumulative output_tokens — replace,
+        // don't add (would double-count the initial value from message_start).
+        tokensOut = usage.output_tokens
       }
     }
   }
 
-  return { blocks, tokens_in: tokensIn, tokens_out: tokensOut, stop_reason: stopReason }
+  return {
+    blocks,
+    tokens_in: tokensIn,
+    tokens_out: tokensOut,
+    cache_creation_input_tokens: cacheCreate,
+    cache_read_input_tokens: cacheRead,
+    stop_reason: stopReason,
+  }
 }
 
-function blockCost(tokens_in: number, tokens_out: number): number {
-  return (tokens_in / 1_000_000) * 3 + (tokens_out / 1_000_000) * 15
+// Sonnet 4.6 pricing (per MTok): input $3, output $15, cache write $3.75 (1.25×),
+// cache read $0.30 (0.1×). cache_creation/read tokens are ALSO billed beyond the
+// regular input_tokens — they don't substitute, they're additive at cheaper rates.
+function blockCost(args: {
+  tokens_in: number
+  tokens_out: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+}): number {
+  return (
+    (args.tokens_in / 1_000_000) * 3 +
+    (args.tokens_out / 1_000_000) * 15 +
+    (args.cache_creation_input_tokens / 1_000_000) * 3.75 +
+    (args.cache_read_input_tokens / 1_000_000) * 0.3
+  )
 }
 
 export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<TurnResult> {
@@ -182,9 +237,20 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
       abortSignal: p.abortSignal,
       sse: p.sse,
     })
-    totalIn += step.tokens_in
+    // Total billable input tokens = uncached + cache_write + cache_read.
+    // We sum into tokens_in for downstream consumers (UI, budgets) so the
+    // total token count stays meaningful; the cost field already reflects
+    // the cheaper cached pricing via blockCost().
+    const stepTokensInTotal =
+      step.tokens_in + step.cache_creation_input_tokens + step.cache_read_input_tokens
+    totalIn += stepTokensInTotal
     totalOut += step.tokens_out
-    const stepCost = blockCost(step.tokens_in, step.tokens_out)
+    const stepCost = blockCost({
+      tokens_in: step.tokens_in,
+      tokens_out: step.tokens_out,
+      cache_creation_input_tokens: step.cache_creation_input_tokens,
+      cache_read_input_tokens: step.cache_read_input_tokens,
+    })
     totalCost += stepCost
     lastStopReason = step.stop_reason
 
@@ -194,7 +260,7 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
       role: 'assistant',
       content: step.blocks,
       model: MODEL,
-      tokens_in: step.tokens_in,
+      tokens_in: stepTokensInTotal,
       tokens_out: step.tokens_out,
       cost_usd: stepCost.toFixed(6),
       stop_reason: step.stop_reason,
@@ -205,8 +271,10 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
     p.sse.write({
       type: 'assistant_message_complete',
       message_id: assistantMessageId,
-      tokens_in: step.tokens_in,
+      tokens_in: stepTokensInTotal,
       tokens_out: step.tokens_out,
+      cache_creation_input_tokens: step.cache_creation_input_tokens,
+      cache_read_input_tokens: step.cache_read_input_tokens,
       cost_usd: stepCost,
       stop_reason: step.stop_reason,
     })
@@ -218,7 +286,7 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
       skill_id: 'copilot:turn',
       provider: 'anthropic',
       model: MODEL,
-      tokens_in: step.tokens_in,
+      tokens_in: stepTokensInTotal,
       tokens_out: step.tokens_out,
       cost_usd: stepCost,
       latency_ms: 0,
@@ -230,7 +298,7 @@ export async function executeCopilotTurn(p: ExecuteCopilotTurnParams): Promise<T
       p.tenant_id,
       month,
       stepCost,
-      step.tokens_in + step.tokens_out,
+      stepTokensInTotal + step.tokens_out,
     )
 
     // Check cost cap AFTER tracking (so the step that crossed the cap is still recorded)
