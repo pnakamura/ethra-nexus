@@ -1053,7 +1053,10 @@ ${JSON.stringify(sanitized, null, 2)}`
       model: completion.model,
       is_fallback: completion.is_fallback,
       artifact_id: artifactId,
-      download_url: `/api/v1/artifacts/${artifactId}/view`,
+      // Use absolute URL when ARTIFACT_PUBLIC_BASE_URL is set (prod: frontend on
+      // a different origin from backend — relative path wouldn't resolve from
+      // the chat UI). Falls back to relative for dev/test.
+      download_url: `${process.env['ARTIFACT_PUBLIC_BASE_URL'] ?? '/api/v1'}/artifacts/${artifactId}/view`,
       title,
       size_bytes: putResult.size_bytes,
     },
