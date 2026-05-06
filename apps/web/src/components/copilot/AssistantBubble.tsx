@@ -1,5 +1,40 @@
+import type { ReactNode } from 'react'
 import { Bot, Loader2, AlertTriangle } from 'lucide-react'
 import { ToolUseInlineMarker } from './ToolUseInlineMarker'
+
+// Minimal markdown linkifier: [text](https://...) → <a>, plus bare https?://... → <a>.
+// Full markdown rendering deferred — this is the smallest viable fix for clickable
+// dashboard links from data:render (Spec #4).
+function linkifyText(text: string): ReactNode[] {
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)]+)/g
+  const parts: ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  let key = 0
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    const linkText = match[1] ?? match[3]!
+    const href = match[2] ?? match[3]!
+    parts.push(
+      <a
+        key={`lnk-${key++}`}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline text-primary hover:opacity-80"
+      >
+        {linkText}
+      </a>,
+    )
+    lastIndex = pattern.lastIndex
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+  return parts
+}
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -58,7 +93,7 @@ export function AssistantBubble({
       <div className="bg-background border-hairline px-4 py-3 text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">
         {content.map((block, i) => {
           if (block.type === 'text') {
-            return <span key={i}>{(block as { text: string }).text}</span>
+            return <span key={i}>{linkifyText((block as { text: string }).text)}</span>
           }
           if (block.type === 'tool_use') {
             const tu = block as { id: string; name: string }
