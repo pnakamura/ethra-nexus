@@ -160,6 +160,7 @@ Skills built-in do Ethra Nexus:
 | `monitor:alert` | Avalia condições e dispara alertas | Groq/OpenRouter |
 | `data:analyze` | Analisa dados estruturados | Gemini/OpenRouter |
 | `data:extract` | Cache-first parser dispatcher: file_id → driver fetch → `parseFile(buffer, mime)` → INSERT cache → preview_md. Provider local. Spec #3 |
+| `data:render` | Sonnet escreve HTML standalone com chart.js inline; valida CSP-safe; salva como artifact. Provider Anthropic (sensitive_data:true). Custo ~$0.20/render. Spec #4 |
 | `a2a:call` | Chama agente externo via protocolo A2A | (delegado) |
 
 Skills custom: `custom:{nome}` — implementadas via N8N workflows.
@@ -170,6 +171,14 @@ shell, registrada em `provider_usage_log` quando o `/copilot` é usado.
 **Adicional (Spec #3):** `system:parse_file` — copilot tool registrada em `allCopilotTools`
 que delega via `executeTask` pro agente seed `input-worker` (slug fixo, `is_system=TRUE`,
 1 por tenant) que executa `data:extract`. Suporta xlsx/pdf/docx/csv/txt/md.
+
+**Adicional (Spec #4):** `system:query_parsed_file` (server-side fatiamento de
+`parsed_files.structured_json` — sem LLM, hard caps de limit≤100 + auto-project≤12 cols
++ response≤50KB) e `system:render_dashboard` (delega via `executeTask` pro agente seed
+`output-worker`, slug fixo, `is_system=TRUE`, que executa `data:render`). Master
+orquestra `parse_file → query_parsed_file → render_dashboard` quando user pede
+dashboard/visualização. Artifact HTML servido em `/api/v1/artifacts/<uuid>/view` (rota
+pública via UUID v4 + TTL 7d, share-by-link estilo Vercel/Drive).
 
 **Não existem "tipos de agente" hardcoded.** Um agente de "atendimento" é simplesmente
 um agente com skills `wiki:query` + `channel:respond` e canais WhatsApp/webchat.
@@ -283,6 +292,7 @@ em `packages/wiki/` mas a implementação distribuiu pelo backend e skills.
 | `copilot_messages` | Mensagens (Anthropic content blocks JSONB) |
 | `copilot_tool_calls` | Tool calls executadas durante turn loop |
 | `parsed_files` | Cache de parsing por sha256 — `structured_json` + `preview_md` por `(tenant_id, sha256)`. Spec #3 |
+| `artifacts` | HTML dashboards gerados pelo output-worker. FK pra `copilot_conversations` (CASCADE) + opcional pra `parsed_files` (SET NULL). TTL 7d. Acessado via `/api/v1/artifacts/<uuid>/view`. Spec #4 |
 
 **Não existem `tenant_members`, `agent_conversations`, `agent_messages`, `wiki_pages`,
 `agent_budget_periods` nem `wiki_operation_log` (singular).** Em rascunhos antigos
