@@ -1,4 +1,5 @@
 import { eq, asc, sql } from 'drizzle-orm'
+import type Anthropic from '@anthropic-ai/sdk'
 import {
   getDb, copilotConversations, copilotMessages, copilotToolCalls,
 } from '@ethra-nexus/db'
@@ -68,20 +69,26 @@ async function streamAssistantStep(args: {
   // call writes (1.25× input price), subsequent calls within the window read
   // (0.1× input price). Net: ~70%+ savings on input tokens for the master,
   // since system + tools dwarf the per-turn message growth.
+  //
+  // SDK 0.24.3 predates the cache_control type, but the API accepts the field
+  // at runtime (caching went GA late 2024). Cast through `unknown` so TS lets
+  // the field reach the wire — when we bump the SDK we can drop the cast.
   const tools = getToolsForAnthropic(allCopilotTools)
   const lastTool = tools[tools.length - 1]
   const cachedTools = lastTool
     ? [...tools.slice(0, -1), { ...lastTool, cache_control: { type: 'ephemeral' as const } }]
     : tools
 
-  const stream = await anth.messages.create({
+  const params = {
     model: MODEL,
     max_tokens: MAX_TOKENS,
     system: [{ type: 'text', text: args.system, cache_control: { type: 'ephemeral' as const } }],
     tools: cachedTools,
     messages: args.history,
-    stream: true,
-  }, { signal: args.abortSignal })
+    stream: true as const,
+  } as unknown as Anthropic.MessageCreateParamsStreaming
+
+  const stream = await anth.messages.create(params, { signal: args.abortSignal })
 
   const blocks: ContentBlock[] = []
   let currentText = ''
