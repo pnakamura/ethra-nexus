@@ -3,10 +3,18 @@ import { getDb, parsedFiles } from '@ethra-nexus/db'
 import type { CopilotTool } from '../tool-registry'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const HARD_MAX_LIMIT = 500
-// Default = 25 (was 100). Master can override via input.limit. Smaller default
-// keeps context compact — large defaults drove >$2 turn costs (Spec #4 smoke).
+
+// Soft caps (master can override): defaults pra pedido sem args.
 const DEFAULT_LIMIT = 25
+// Hard caps (server enforces — não-overridable): protege custo do master.
+// limit hard-capped a 100 (era 500) — 500 rows × 79 cols = 1.3MB → 688K tokens
+// no contexto do master → $2/turn. Limitar a 100 reduz pior caso ~5x.
+const HARD_MAX_LIMIT = 100
+// Auto-projection: se master não passar `columns`, retornamos só as primeiras
+// AUTO_COLUMN_LIMIT colunas (com warning). Forces intentional column selection.
+const AUTO_COLUMN_LIMIT = 12
+// Hard byte cap no response total (rows + meta). Trunca rows se exceder.
+const RESPONSE_MAX_BYTES = 50 * 1024  // 50KB
 
 type ParserFormat = 'xlsx' | 'pdf' | 'docx' | 'csv' | 'txt' | 'md'
 
@@ -38,11 +46,12 @@ export const queryParsedFileTool: CopilotTool<Input, Output> = {
     'primeira (xlsx tem múltiplas abas — todas estão cacheadas).',
     'Sem LLM call, é rápido e barato — chame múltiplas vezes se precisar.',
     '',
-    'PRÁTICAS PARA REDUZIR CUSTO:',
-    '- SEMPRE passe `columns` com SÓ as colunas que precisa (ex: ["nome","valor"]).',
-    '  Sem projeção, retorna todas as colunas — pode estourar 30K tokens.',
-    '- Use `limit` pequeno (default 25). Aumente só quando explicitamente precisar.',
-    '- Use `filter` pra reduzir rows server-side antes de receber.',
+    'CAPS DE CUSTO (server enforces — não pode escapar):',
+    '- limit hard-capped em 100 (default 25). Pedir 500 retorna 100.',
+    '- Sem `columns`, server projeta SÓ as primeiras 12 colunas (e devolve warning).',
+    '- Response total cappado em 50KB — rows truncadas se exceder.',
+    'SEMPRE passe `columns` com SÓ as 3-8 colunas que vai usar — é a otimização',
+    'mais importante. Sem isso o turno fica caro mesmo com tudo cappado.',
     '',
     'Args:',
     '- parsed_id (UUID, obrigatório): id retornado por parse_file',
@@ -64,7 +73,7 @@ export const queryParsedFileTool: CopilotTool<Input, Output> = {
       columns: { type: 'array', items: { type: 'string' } },
       filter: { type: 'object' },
       sort: { type: 'string' },
-      limit: { type: 'number', minimum: 1, maximum: 500 },
+      limit: { type: 'number', minimum: 1, maximum: 100, description: 'Default 25, max 100. Server hard-caps even if you pass higher.' },
       offset: { type: 'number', minimum: 0 },
     },
     required: ['parsed_id'],
@@ -158,14 +167,50 @@ export const queryParsedFileTool: CopilotTool<Input, Output> = {
     const limit = Math.min(input.limit ?? DEFAULT_LIMIT, HARD_MAX_LIMIT)
     let sliced = filtered.slice(offset, offset + limit)
 
-    // Apply column projection
+    // Column projection — defesa em profundidade contra contexto inflado.
+    // Master DEVE passar `columns`. Se não passar, projetamos só as primeiras
+    // AUTO_COLUMN_LIMIT pra evitar payload de 79 cols × 25 rows = ~50KB.
+    const warnings: string[] = []
+    let projectedColumns: string[] | undefined
     if (input.columns && input.columns.length > 0) {
-      const cols = input.columns
+      projectedColumns = input.columns
+    } else if (sliced.length > 0) {
+      // Auto-project pegando todas as keys da primeira row, capando em AUTO_COLUMN_LIMIT
+      const allKeys = Object.keys(sliced[0]!)
+      if (allKeys.length > AUTO_COLUMN_LIMIT) {
+        projectedColumns = allKeys.slice(0, AUTO_COLUMN_LIMIT)
+        warnings.push(
+          `auto-projected first ${AUTO_COLUMN_LIMIT} of ${allKeys.length} columns ` +
+          `(pass \`columns\` arg to choose specific ones)`,
+        )
+      }
+    }
+    if (projectedColumns) {
+      const cols = projectedColumns
       sliced = sliced.map(r => {
         const proj: Record<string, unknown> = {}
         for (const c of cols) proj[c] = r[c]
         return proj
       })
+    }
+
+    // Hard byte cap — trunca rows se response > RESPONSE_MAX_BYTES.
+    // Sem isso, master pode pedir limit=100 com cells longas e estourar.
+    const measureBytes = (rows: typeof sliced) => Buffer.byteLength(JSON.stringify(rows), 'utf8')
+    if (measureBytes(sliced) > RESPONSE_MAX_BYTES) {
+      let lo = 0
+      let hi = sliced.length
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1
+        if (measureBytes(sliced.slice(0, mid)) <= RESPONSE_MAX_BYTES) lo = mid
+        else hi = mid - 1
+      }
+      const original = sliced.length
+      sliced = sliced.slice(0, lo)
+      warnings.push(
+        `response truncated to ${lo} of ${original} rows (50KB byte cap reached); ` +
+        `use \`columns\` to pick fewer fields or \`offset\` for next page`,
+      )
     }
 
     return {
@@ -175,6 +220,7 @@ export const queryParsedFileTool: CopilotTool<Input, Output> = {
       total_rows_in_source: totalAfterFilter,
       rows: sliced,
       truncated: offset + sliced.length < totalAfterFilter,
+      ...(warnings.length > 0 ? { warnings } : {}),
     }
   },
 }
