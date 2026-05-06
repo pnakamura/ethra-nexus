@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { getDb, artifacts } from '@ethra-nexus/db'
 import { createStorageDriver } from '@ethra-nexus/agents'
 
@@ -20,6 +20,11 @@ export async function artifactsRoutes(app: FastifyInstance) {
     const db = getDb()
     const driver = createStorageDriver()
 
+    // Public route (Spec #4): UUID-only access, no tenant filter.
+    // Security: artifact_id is a v4 UUID (~122 bits unguessable entropy);
+    // expires_at TTL caps exposure window (7d default). Equivalent to
+    // share-by-link model (Vercel/Google Drive). Tenant isolation
+    // maintained because users only know URLs of their own artifacts.
     const rows = await db
       .select({
         storage_key: artifacts.storage_key,
@@ -28,10 +33,7 @@ export async function artifactsRoutes(app: FastifyInstance) {
         expires_at: artifacts.expires_at,
       })
       .from(artifacts)
-      .where(and(
-        eq(artifacts.id, request.params.id),
-        eq(artifacts.tenant_id, request.tenantId),
-      ))
+      .where(eq(artifacts.id, request.params.id))
       .limit(1)
 
     const row = rows[0]

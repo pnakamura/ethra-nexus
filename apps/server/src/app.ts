@@ -66,8 +66,15 @@ export async function buildApp() {
 
   // ── Global hook: JWT + tenant isolation ──────────────────
   app.addHook('onRequest', async (request, reply) => {
-    // Skip auth for public routes
+    // Skip auth for public routes.
+    // /api/v1/artifacts/<uuid>/view is intentionally public (Spec #4): the URL is
+    // a v4 UUID (~122 bits of entropy, unguessable) + 7d TTL via expires_at, same
+    // share-by-link model as Vercel/Google Drive. Allows users to click the link
+    // from the chat without re-auth flow on a different origin.
     const publicPaths = ['/api/v1/health', '/api/v1/auth/login', '/api/v1/auth/signup', '/api/v1/webhooks', '/.well-known', '/api/v1/a2a']
+    if (/^\/api\/v1\/artifacts\/[0-9a-f-]{36}\/view$/.test(request.url)) {
+      return
+    }
     if (publicPaths.some((p) => request.url.startsWith(p))) {
       return
     }
